@@ -14,7 +14,6 @@ import { XRControllerModelFactory } from 'https://cdn.jsdelivr.net/npm/three@0.1
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 camera.position.set(0,2,8);
-camera.lookAt(0,0.5,0);
 
 // ===== Renderer =====
 const renderer = new THREE.WebGLRenderer({antialias:true});
@@ -24,22 +23,34 @@ renderer.shadowMap.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== Sky dome =====
-const skyGeo = new THREE.SphereGeometry(100,32,32);
-const skyMat = new THREE.MeshBasicMaterial({color:0x87ceeb, side:THREE.BackSide});
+// ===== Sky Dome =====
+const skyGeo = new THREE.SphereGeometry(500,32,32);
+const skyMat = new THREE.MeshStandardMaterial({color:0x87ceeb, side:THREE.BackSide});
 const sky = new THREE.Mesh(skyGeo,skyMat);
 scene.add(sky);
 
+// Optional clouds
+for(let i=0;i<50;i++){
+  const cloud = new THREE.Mesh(new THREE.SphereGeometry(2,8,8), new THREE.MeshStandardMaterial({color:0xffffff}));
+  cloud.position.set((Math.random()-0.5)*300, 20 + Math.random()*50, (Math.random()-0.5)*300);
+  scene.add(cloud);
+}
+
 // ===== Lights =====
-const ambientLight = new THREE.AmbientLight(0xffffff,0.6); scene.add(ambientLight);
-const dirLight = new THREE.DirectionalLight(0xffffff,1); dirLight.position.set(10,20,10); dirLight.castShadow=true; scene.add(dirLight);
+scene.add(new THREE.AmbientLight(0xffffff,0.6));
+const dirLight = new THREE.DirectionalLight(0xffffff,1);
+dirLight.position.set(10,20,10);
+dirLight.castShadow=true;
+scene.add(dirLight);
 
 // ===== Ground =====
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(50,50), new THREE.MeshStandardMaterial({color:0x228B22, roughness:1}));
 ground.rotation.x=-Math.PI/2; ground.receiveShadow=true; scene.add(ground);
 
 // ===== Adventure Object =====
-class AdventureObject{ constructor(mesh,type){ this.mesh=mesh; this.type=type; scene.add(mesh); mesh.castShadow=true; } }
+class AdventureObject{
+  constructor(mesh,type){ this.mesh=mesh; this.type=type; scene.add(mesh); mesh.castShadow=true; }
+}
 
 // ===== Character =====
 class Character{
@@ -57,8 +68,19 @@ class Character{
     this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
     scene.add(this.bubbleMesh); this.texture=texture; this.updateBubble("");
   }
-  updateBubble(text){ this.ctx.clearRect(0,0,1024,256); this.ctx.fillStyle="white"; this.ctx.font="72px Arial"; this.ctx.fillText(text,20,160); this.texture.needsUpdate=true; this.bubbleText=text; }
-  moveToward(target,speed=0.07){ if(!this.visible) return true; const dir=new THREE.Vector3().subVectors(target,this.mesh.position); const distance=dir.length(); if(distance<speed){ this.mesh.position.copy(target); return true; } dir.normalize(); this.mesh.position.add(dir.multiplyScalar(speed)); return false; }
+  updateBubble(text){
+    this.ctx.clearRect(0,0,1024,256);
+    this.ctx.fillStyle="white"; this.ctx.font="72px Arial"; this.ctx.fillText(text,20,160);
+    this.texture.needsUpdate=true; this.bubbleText=text;
+  }
+  moveToward(target,speed=0.07){
+    if(!this.visible) return true;
+    const dir=new THREE.Vector3().subVectors(target,this.mesh.position);
+    const distance=dir.length();
+    if(distance<speed){ this.mesh.position.copy(target); return true; }
+    dir.normalize(); this.mesh.position.add(dir.multiplyScalar(speed));
+    return false;
+  }
   speak(dialog){ if(this.visible) this.dialogQueue.push(dialog); }
   updateBubblePosition(){ if(!this.visible) return; this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z); this.bubbleMesh.lookAt(camera.position); }
   nextDialog(){ if(this.dialogQueue.length>0 && this.visible){ const text=this.dialogQueue.shift(); this.updateBubble(text); } }
@@ -94,7 +116,16 @@ function nextBuildPosition(character){
   if(targets.length===0) targets = structures;
   let targetStructure=targets.reduce((min,s)=>s.blocks.length<min.blocks.length?s:min, targets[0]);
   let xOff=0,zOff=0,y=0,pos=new THREE.Vector3(),attempts=0;
-  do{ xOff = targetStructure.blocks.length%2; zOff = Math.floor(targetStructure.blocks.length/2)%2; y = Math.floor(targetStructure.blocks.length/4); pos.set(targetStructure.basePos.x+xOff,0.5+y,targetStructure.basePos.z+zOff); attempts++; if(targetStructure.blocks.some(b=>b.mesh.position.distanceTo(pos)<0.1)){ pos.x += (Math.random()-0.5)*0.3; pos.z += (Math.random()-0.5)*0.3; } } while(attempts<10 && targetStructure.blocks.some(b=>b.mesh.position.distanceTo(pos)<0.1));
+  do{
+    xOff = targetStructure.blocks.length%2;
+    zOff = Math.floor(targetStructure.blocks.length/2)%2;
+    y = Math.floor(targetStructure.blocks.length/4);
+    pos.set(targetStructure.basePos.x+xOff,0.5+y,targetStructure.basePos.z+zOff);
+    attempts++;
+    if(targetStructure.blocks.some(b=>b.mesh.position.distanceTo(pos)<0.1)){
+      pos.x += (Math.random()-0.5)*0.3; pos.z += (Math.random()-0.5)*0.3;
+    }
+  } while(attempts<10 && targetStructure.blocks.some(b=>b.mesh.position.distanceTo(pos)<0.1));
   return {pos,targetStructure};
 }
 
@@ -111,31 +142,58 @@ function characterThink(character){
   characters.forEach(other=>{
     if(other!==character){
       const dist=character.mesh.position.distanceTo(other.mesh.position);
-      if(dist<minDist){ const away=new THREE.Vector3().subVectors(character.mesh.position,other.mesh.position).normalize().multiplyScalar(0.05); character.mesh.position.add(away); }
+      if(dist<minDist){
+        const away=new THREE.Vector3().subVectors(character.mesh.position,other.mesh.position).normalize().multiplyScalar(0.05);
+        character.mesh.position.add(away);
+      }
     }
   });
   const distPlayer = character.mesh.position.distanceTo(playerPos);
-  if(distPlayer<5 && Math.random()<0.02){ const phrases=["Hi there! Watch our circus!","Look what we built!","Isn’t this fun?"]; character.speak(phrases[Math.floor(Math.random()*phrases.length)]); character.moveToward(playerPos,0.03); }
-  if(Math.random()<0.01){ const phrases=["Let's add more tents!","Look at this balloon!","The audience will love it!","I need more blocks here.","This area looks fun!"]; character.speak(phrases[Math.floor(Math.random()*phrases.length)]; }
-  if(!character.targetPos){ const {pos,targetStructure}=nextBuildPosition(character); character.targetPos=pos; character.currentStructure=targetStructure; character.nextType=['cube','cylinder','sphere','plane','capsule'][Math.floor(Math.random()*5)]; }
+  if(distPlayer<5 && Math.random()<0.02){
+    const phrases=["Hi there! Watch our circus!","Look what we built!","Isn’t this fun?"];
+    character.speak(phrases[Math.floor(Math.random()*phrases.length)]);
+    character.moveToward(playerPos,0.03);
+  }
+  if(Math.random()<0.01){
+    const phrases=["Let's add more tents!","Look at this balloon!","The audience will love it!","I need more blocks here.","This area looks fun!"];
+    character.speak(phrases[Math.floor(Math.random()*phrases.length)]);
+  }
+  if(!character.targetPos){
+    const {pos,targetStructure}=nextBuildPosition(character);
+    character.targetPos=pos; character.currentStructure=targetStructure;
+    character.nextType=['cube','cylinder','sphere','plane','capsule'][Math.floor(Math.random()*5)];
+  }
   const arrived = character.moveToward(character.targetPos,0.07);
-  if(arrived || character.targetPos.distanceTo(character.mesh.position)<0.05){ const block=createBlockOfType(character.nextType,character.targetPos); character.blocksPlaced.push(block); character.currentStructure.blocks.push(block); character.learnColor(pickColor(character)); character.learnStructure(character.currentStructure); if(circusStructures.includes(character.currentStructure) && character.currentStructure.blocks.length>=12){ character.currentStructure.complete=true; } character.targetPos=null; }
-  character.updateBubblePosition(); character.nextDialog();
+  if(arrived || character.targetPos.distanceTo(character.mesh.position)<0.05){
+    const block=createBlockOfType(character.nextType,character.targetPos);
+    character.blocksPlaced.push(block); character.currentStructure.blocks.push(block);
+    character.learnColor(pickColor(character)); character.learnStructure(character.currentStructure);
+    if(circusStructures.includes(character.currentStructure) && character.currentStructure.blocks.length>=12){ character.currentStructure.complete=true; }
+    character.targetPos=null;
+  }
+  character.updateBubblePosition();
+  character.nextDialog();
 }
 
 // ===== VR Controllers for Movement =====
-const controller1 = renderer.xr.getController(0); const controller2 = renderer.xr.getController(1);
+const controller1 = renderer.xr.getController(0);
+const controller2 = renderer.xr.getController(1);
 scene.add(controller1); scene.add(controller2);
 const controllerModelFactory = new XRControllerModelFactory();
 scene.add(controllerModelFactory.createControllerModel(controller1));
 scene.add(controllerModelFactory.createControllerModel(controller2));
 
 function handleControllerMovement(controller){
-  const session = renderer.xr.getSession(); if(!session) return;
-  const inputSource = controller.inputSource; if(inputSource && inputSource.gamepad){
-    const axes = inputSource.gamepad.axes; const speed = 0.1;
-    const dir = new THREE.Vector3(); camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
-    camera.position.add(dir.multiplyScalar(-axes[3]*speed)); camera.position.x += axes[2]*speed;
+  const session = renderer.xr.getSession();
+  if(!session) return;
+  const inputSource = controller.inputSource;
+  if(inputSource && inputSource.gamepad){
+    const axes = inputSource.gamepad.axes;
+    const speed = 0.1;
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir); dir.y = 0; dir.normalize();
+    camera.position.add(dir.multiplyScalar(-axes[3]*speed));
+    camera.position.x += axes[2]*speed;
   }
 }
 
@@ -143,7 +201,8 @@ function handleControllerMovement(controller){
 function animate(){
   renderer.setAnimationLoop(()=>{
     updatePlayerPos();
-    handleControllerMovement(controller1); handleControllerMovement(controller2);
+    handleControllerMovement(controller1);
+    handleControllerMovement(controller2);
     const now=Date.now();
     if(now-lastActionTime>50){ characters.forEach(c=>characterThink(c)); lastActionTime=now; }
     renderer.render(scene,camera);
@@ -152,7 +211,9 @@ function animate(){
 
 // ===== Resize =====
 window.addEventListener('resize',()=>{
-  camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight);
+  camera.aspect=window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth,window.innerHeight);
 });
 
 animate();
