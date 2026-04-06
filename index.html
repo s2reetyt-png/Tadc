@@ -242,22 +242,21 @@ function characterThink(character){
   character.nextDialog();
 }
 
-// ===== VR Controller Movement =====
-function handleVRMovement(){
+// ===== VR Controller Movement & Rotation =====
+function handleVRControls(){
   const session = renderer.xr.getSession();
   if(!session) return;
 
-  const inputSources = session.inputSources;
-  inputSources.forEach(source=>{
+  session.inputSources.forEach(source=>{
     if(source.gamepad){
-      const axes = source.gamepad.axes; // thumbsticks
+      const axes = source.gamepad.axes;
       const speed = 0.05;
-      const dir = new THREE.Vector3();
-      camera.getWorldDirection(dir);
-      dir.y = 0;
-      dir.normalize();
-      rig.position.add(dir.multiplyScalar(-axes[3]*speed)); // forward/back
-      rig.position.x += axes[2]*speed; // left/right
+      // Left stick movement (usually axes[2,3])
+      rig.position.add(new THREE.Vector3(axes[2]*speed,0, -axes[3]*speed).applyEuler(rig.rotation));
+      // Right stick rotation (usually axes[2,3] on right controller)
+      if(source.handedness==='right'){
+        rig.rotation.y -= axes[2]*0.05;
+      }
     }
   });
 }
@@ -266,7 +265,7 @@ function handleVRMovement(){
 function animate(){
   renderer.setAnimationLoop(()=>{
     updatePlayerPos();
-    handleVRMovement();
+    handleVRControls();
     const now=Date.now();
     if(now-lastActionTime>50){ characters.forEach(c=>characterThink(c)); lastActionTime=now; }
     renderer.render(scene,camera);
