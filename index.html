@@ -243,33 +243,30 @@ function characterThink(character){
 }
 
 // ===== VR Controller Movement =====
-const controller1 = renderer.xr.getController(0);
-const controller2 = renderer.xr.getController(1);
-scene.add(controller1);
-scene.add(controller2);
+function handleVRMovement(){
+  const session = renderer.xr.getSession();
+  if(!session) return;
 
-function handleControllerMovement(controller){
-    const session = renderer.xr.getSession();
-    if(!session) return;
-    const input = controller.inputSource;
-    if(input && input.gamepad){
-        const axes = input.gamepad.axes;
-        const speed = 0.1;
-        const dir = new THREE.Vector3();
-        camera.getWorldDirection(dir);
-        dir.y = 0;
-        dir.normalize();
-        rig.position.add(dir.multiplyScalar(-axes[3]*speed));
-        rig.position.x += axes[2]*speed;
+  const inputSources = session.inputSources;
+  inputSources.forEach(source=>{
+    if(source.gamepad){
+      const axes = source.gamepad.axes; // thumbsticks
+      const speed = 0.05;
+      const dir = new THREE.Vector3();
+      camera.getWorldDirection(dir);
+      dir.y = 0;
+      dir.normalize();
+      rig.position.add(dir.multiplyScalar(-axes[3]*speed)); // forward/back
+      rig.position.x += axes[2]*speed; // left/right
     }
+  });
 }
 
 // ===== Animate Loop =====
 function animate(){
   renderer.setAnimationLoop(()=>{
     updatePlayerPos();
-    handleControllerMovement(controller1);
-    handleControllerMovement(controller2);
+    handleVRMovement();
     const now=Date.now();
     if(now-lastActionTime>50){ characters.forEach(c=>characterThink(c)); lastActionTime=now; }
     renderer.render(scene,camera);
