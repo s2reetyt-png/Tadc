@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Caine & Bubble VR Adventures</title>
-  <style>body{margin:0;overflow:hidden;}canvas{display:block;} #uploadBtn{position:absolute;top:10px;left:10px;z-index:10;}</style>
+  <title>Caine VR AI Circus</title>
+  <style>body{margin:0;overflow:hidden;}canvas{display:block;}#upload{position:absolute;top:10px;left:10px;z-index:1000;}</style>
 </head>
 <body>
-<input type="file" id="uploadBtn" accept="image/*">
+<input type="file" id="upload" multiple>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
@@ -14,28 +14,24 @@ import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-
-// ===== VR Rig =====
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
-camera.position.set(0,1.6,5);
+camera.position.set(0,1.6,3);
 
 // ===== Renderer =====
 const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputEncoding = THREE.sRGBEncoding;
 renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== Lights =====
+// ===== Lights & Ground =====
 scene.add(new THREE.AmbientLight(0xffffff,1));
 const dir = new THREE.DirectionalLight(0xffffff,0.8);
 dir.position.set(5,10,5);
 scene.add(dir);
-
-// ===== Ground =====
 const ground = new THREE.Mesh(
   new THREE.PlaneGeometry(50,50),
   new THREE.MeshStandardMaterial({color:0x444444, roughness:0.8, metalness:0})
@@ -44,217 +40,143 @@ ground.rotation.x=-Math.PI/2;
 scene.add(ground);
 
 // ===== Adventure Object Class =====
-class AdventureObject {
-  constructor(mesh,type){
-    this.mesh=mesh;
-    this.type=type;
-    scene.add(mesh);
-  }
-}
+class AdventureObject { constructor(mesh,type){ this.mesh=mesh; this.type=type; scene.add(mesh); }}
 
 // ===== Character Class =====
 class Character {
   constructor(mesh,name){
-    this.mesh=mesh;
-    this.name=name;
-    this.blocksPlaced=[];
-    this.targetPos=null;
-    this.currentStructure=null;
-    this.dialogQueue=[];
-    this.knowledge={colorsSeen:new Set(),structuresSeen:[],objectsSeen:new Set()};
-    this.rememberedModels=[]; // store uploaded models
-    this.visible=true;
-    this.createBubble();
-    scene.add(mesh);
+    this.mesh=mesh; this.name=name; this.blocksPlaced=[]; this.targetPos=null; this.currentStructure=null;
+    this.dialogQueue=[]; this.knowledge={colorsSeen:new Set(),structuresSeen:[],objectsSeen:new Set()};
+    this.visible=true; this.rememberedModels=[]; this.createBubble(); scene.add(mesh);
   }
-
   createBubble(){
-    const canvas=document.createElement('canvas');
-    canvas.width=1024; canvas.height=256;
+    const canvas=document.createElement('canvas'); canvas.width=1024; canvas.height=256;
     this.ctx=canvas.getContext('2d');
     const texture=new THREE.CanvasTexture(canvas);
     const material=new THREE.MeshBasicMaterial({map:texture,transparent:true});
     this.bubbleMesh=new THREE.Mesh(new THREE.PlaneGeometry(6,1.5),material);
     this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
-    scene.add(this.bubbleMesh);
-    this.texture=texture;
-    this.updateBubble("");
+    scene.add(this.bubbleMesh); this.texture=texture; this.updateBubble("");
   }
-
-  updateBubble(text){
-    this.ctx.clearRect(0,0,1024,256);
-    this.ctx.fillStyle="white";
-    this.ctx.font="96px Arial";
-    this.ctx.fillText(text,20,160);
-    this.texture.needsUpdate=true;
-    this.bubbleText=text;
-  }
-
-  moveToward(target,speed=0.1){
+  updateBubble(text){ this.ctx.clearRect(0,0,1024,256); this.ctx.fillStyle="white"; this.ctx.font="96px Arial"; this.ctx.fillText(text,20,160); this.texture.needsUpdate=true; this.bubbleText=text; }
+  moveToward(target,speed=0.15){
     if(!this.visible) return true;
-    const dir=new THREE.Vector3().subVectors(target,this.mesh.position);
-    const distance=dir.length();
-    if(distance<speed){
-      this.mesh.position.copy(target);
-      return true;
-    }
-    dir.normalize();
-    this.mesh.position.add(dir.multiplyScalar(speed));
-    return false;
+    const dir=new THREE.Vector3().subVectors(target,this.mesh.position); const distance=dir.length();
+    if(distance<speed){ this.mesh.position.copy(target); return true; }
+    dir.normalize(); this.mesh.position.add(dir.multiplyScalar(speed)); return false;
   }
-
-  speak(dialog){
-    if(this.visible) this.dialogQueue.push(dialog);
-    if(this.visible && 'speechSynthesis' in window){
-      const utter = new SpeechSynthesisUtterance(dialog);
-      utter.voice = speechSynthesis.getVoices().find(v=>v.lang.startsWith('en')) || null;
-      utter.pitch = this.name==="Bubble"?1.2:1.0;
-      utter.rate = 1.0;
-      speechSynthesis.speak(utter);
-    }
-  }
-
-  updateBubblePosition(){
-    if(!this.visible) return;
-    this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
-    this.bubbleMesh.lookAt(camera.position);
-  }
+  speak(dialog){ if(this.visible) this.dialogQueue.push(dialog); if(this.visible && 'speechSynthesis' in window){ const utter=new SpeechSynthesisUtterance(dialog); utter.voice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('en'))||null; utter.pitch=this.name==="Bubble"?1.2:1.0; utter.rate=1.0; speechSynthesis.speak(utter); } }
+  updateBubblePosition(){ if(!this.visible) return; this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z); this.bubbleMesh.lookAt(camera.position); }
   nextDialog(){ if(this.dialogQueue.length>0 && this.visible){ const text=this.dialogQueue.shift(); this.updateBubble(text); } }
   learnColor(color){ this.knowledge.colorsSeen.add(color); }
   knowsColor(color){ return this.knowledge.colorsSeen.has(color); }
   learnStructure(structure){ this.knowledge.structuresSeen.push(structure); }
   learnObject(obj){ this.knowledge.objectsSeen.add(obj); }
   knowsObject(obj){ return this.knowledge.objectsSeen.has(obj); }
-
-  rememberModel(model){
-    this.rememberedModels.push(model);
-  }
-
-  buildFromModel(model,pos){
-    // model = array of {pos,color,primitive}
-    model.forEach(p=>{
-      let mesh;
-      switch(p.primitive){
-        case 'sphere': mesh = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshStandardMaterial({color:p.color})); break;
-        case 'capsule': mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.1,0.2), new THREE.MeshStandardMaterial({color:p.color})); break;
-        case 'cylinder': mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,0.2), new THREE.MeshStandardMaterial({color:p.color})); break;
-        default: mesh = new THREE.Mesh(new THREE.BoxGeometry(0.2,0.2,0.2), new THREE.MeshStandardMaterial({color:p.color})); break;
-      }
-      mesh.position.set(pos.x+p.pos.x,pos.y+p.pos.y,pos.z+p.pos.z);
-      scene.add(mesh);
-      this.blocksPlaced.push(new AdventureObject(mesh,p.primitive));
-    });
-  }
+  rememberModel(model){ this.rememberedModels.push(model); }
 }
 
 // ===== Characters =====
-const bubbleMesh=new THREE.Mesh(
-  new THREE.SphereGeometry(0.5),
-  new THREE.MeshStandardMaterial({color:0x00ffcc})
-);
+const bubbleMesh=new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color:0x00ffcc}));
 const bubble=new Character(bubbleMesh,"Bubble");
-
-const caineMesh=new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.5,1.5),
-  new THREE.MeshStandardMaterial({color:0xff4444})
-);
+const caineMesh=new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.5), new THREE.MeshStandardMaterial({color:0xff4444}));
 const caine=new Character(caineMesh,"Caine");
 caine.mesh.position.set(-5,0.75,-5);
+const characters=[caine,bubble];
 
-// ===== Circus Already Built =====
-function buildCircus(){
-  for(let x=-5;x<=5;x+=5){
-    for(let z=-5;z<=5;z+=5){
-      const tent = new THREE.Mesh(new THREE.ConeGeometry(2,2,6), new THREE.MeshStandardMaterial({color:0xffaa00}));
-      tent.position.set(x,1,z);
-      scene.add(tent);
-    }
+// ===== Helpers =====
+const blockColors=[0xff0000,0x00ff00,0x0000ff,0xffff00,0xff00ff,0x00ffff];
+function pickColor(character){ for(const c of blockColors){ if(!character.knowsColor(c)) return c; } return blockColors[Math.floor(Math.random()*blockColors.length)]; }
+function createBlock(type,pos,color){ 
+  let mesh; color=color||pickColor(caine);
+  switch(type){
+    case 'cube': mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1), new THREE.MeshStandardMaterial({color})); break;
+    case 'sphere': mesh=new THREE.Mesh(new THREE.SphereGeometry(0.5), new THREE.MeshStandardMaterial({color})); break;
+    case 'cylinder': mesh=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,1), new THREE.MeshStandardMaterial({color})); break;
+    default: mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1), new THREE.MeshStandardMaterial({color})); break;
   }
-}
-buildCircus();
-
-// ===== Player Upload Model =====
-document.getElementById('uploadBtn').addEventListener('change',async e=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  img.onload = ()=>{
-    const canvas = document.createElement('canvas');
-    const size = 16; // small resolution
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img,0,0,size,size);
-    const data = ctx.getImageData(0,0,size,size).data;
-    const model=[];
-    for(let y=0;y<size;y++){
-      for(let x=0;x<size;x++){
-        const idx = (y*size+x)*4;
-        const r = data[idx], g=data[idx+1], b=data[idx+2], a=data[idx+3];
-        if(a<128) continue;
-        const color = (r<<16)|(g<<8)|b;
-        // pick primitive randomly for variety
-        const primitives = ['cube','sphere','capsule','cylinder'];
-        const primitive = primitives[Math.floor(Math.random()*primitives.length)];
-        model.push({pos:{x:x/size-0.5,y:(size-y)/size-0.5,z:0},color,primitive});
-      }
-    }
-    caine.rememberModel(model);
-    caine.speak("I remember this model!");
-  }
-});
-
-// ===== Caine Thinking & Adventures =====
-function caineThink(){
-  if(caine.rememberedModels.length===0) return;
-  if(!caine.targetPos){
-    caine.targetPos = new THREE.Vector3(Math.random()*10-5,0,Math.random()*10-5);
-    caine.currentModel = caine.rememberedModels[Math.floor(Math.random()*caine.rememberedModels.length)];
-  }
-  const arrived = caine.moveToward(caine.targetPos,0.05);
-  if(arrived){
-    caine.buildFromModel(caine.currentModel,caine.targetPos);
-    caine.targetPos = null;
-  }
-  caine.updateBubblePosition();
-  caine.nextDialog();
+  mesh.position.copy(pos); return new AdventureObject(mesh,type);
 }
 
-// ===== Player Position =====
-let playerPos = new THREE.Vector3();
+// ===== Circus =====
+const circusStructures=[];
+function createCircus(basePos){ 
+  const pos=new THREE.Vector3().copy(basePos);
+  for(let i=0;i<3;i++){ for(let j=0;j<3;j++){ const b=createBlock('cube',pos.clone().add(new THREE.Vector3(i,0,j))); circusStructures.push(b); } } 
+}
+createCircus(new THREE.Vector3(0,0.5,0));
+createCircus(new THREE.Vector3(5,0.5,0));
+createCircus(new THREE.Vector3(-5,0.5,0));
+
+// ===== Player =====
+let playerPos=new THREE.Vector3();
 function updatePlayerPos(){ playerPos.copy(rig.position); }
+
+// ===== Build AI =====
+let lastAction=0;
+function characterThink(character){
+  if(!character.visible) return;
+  // Avoid others
+  characters.forEach(other=>{ if(other!==character){ const dist=character.mesh.position.distanceTo(other.mesh.position); if(dist<1.2){ const away=new THREE.Vector3().subVectors(character.mesh.position,other.mesh.position).normalize().multiplyScalar(0.05); character.mesh.position.add(away); } }});
+  // Random dialogue
+  if(Math.random()<0.05){ const phrases=["I have ideas!","Let's build something new!","This looks fun!"]; character.speak(phrases[Math.floor(Math.random()*phrases.length)]); }
+  // Auto-build remembered models
+  if(character.rememberedModels.length>0 && !character.targetPos){
+    const model=character.rememberedModels[Math.floor(Math.random()*character.rememberedModels.length)];
+    const base=new THREE.Vector3(Math.random()*10-5,0.5,Math.random()*10-5);
+    character.targetPos=base;
+    character.currentModel=model;
+  }
+  if(character.targetPos && character.currentModel){
+    const arrived=character.moveToward(character.targetPos,0.1);
+    if(arrived){
+      // Build model as blocks
+      character.currentModel.blocks.forEach(b=>{
+        const clone=createBlock(b.type,character.targetPos.clone().add(b.position),b.color);
+        character.blocksPlaced.push(clone);
+      });
+      character.targetPos=null;
+      character.currentModel=null;
+    }
+  }
+  character.updateBubblePosition(); character.nextDialog();
+}
 
 // ===== VR Controls =====
 function handleVRControls(){
-  const session = renderer.xr.getSession();
-  if(!session) return;
-  session.inputSources.forEach(source=>{
-    if(source.gamepad){
-      const axes = source.gamepad.axes;
-      const speed = 0.05;
-      rig.position.add(new THREE.Vector3(axes[2]*speed,0, -axes[3]*speed).applyEuler(rig.rotation));
-      if(source.handedness==='right'){ rig.rotation.y -= axes[2]*0.05; }
-    }
+  const session=renderer.xr.getSession(); if(!session) return;
+  session.inputSources.forEach(source=>{ if(source.gamepad){ const axes=source.gamepad.axes; rig.position.add(new THREE.Vector3(axes[2]*0.05,0,-axes[3]*0.05).applyEuler(rig.rotation)); if(source.handedness==='right'){ rig.rotation.y -= axes[2]*0.05; }}});}
+  
+// ===== Upload Handling =====
+const upload=document.getElementById('upload');
+upload.addEventListener('change',e=>{
+  Array.from(e.target.files).forEach(file=>{
+    const reader=new FileReader();
+    reader.onload=function(ev){
+      const img=new Image();
+      img.onload=function(){
+        // Simple primitive approximation: 3x3x3 cubes
+        const blocks=[];
+        for(let x=0;x<3;x++){for(let y=0;y<3;y++){for(let z=0;z<3;z++){ blocks.push({position:new THREE.Vector3(x*0.6,y*0.6,z*0.6),type:'cube',color:0xff00ff}); }}}
+        caine.rememberModel({blocks,source:file.name});
+      }; img.src=ev.target.result;
+    }; reader.readAsDataURL(file);
   });
-}
+});
 
-// ===== Animate Loop =====
+// ===== Animate =====
 function animate(){
   renderer.setAnimationLoop(()=>{
     updatePlayerPos();
     handleVRControls();
-    caineThink();
+    const now=Date.now();
+    if(now-lastAction>50){ characters.forEach(c=>characterThink(c)); lastAction=now; }
     renderer.render(scene,camera);
   });
 }
 
 // ===== Resize =====
-window.addEventListener('resize',()=>{
-  camera.aspect=window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth,window.innerHeight);
-});
+window.addEventListener('resize',()=>{ camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight); });
 
 animate();
 </script>
