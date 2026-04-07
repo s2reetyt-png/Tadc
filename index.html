@@ -1,57 +1,47 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Caine & Bubble VR Circus Adventures</title>
+  <title>Persistent VR Circus</title>
   <style>body{margin:0;overflow:hidden;}canvas{display:block;}</style>
 </head>
 <body>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/loaders/GLTFLoader.js';
 
-// ===== Scene & Camera =====
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb); // daytime sky
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
-camera.position.set(12,10,12);
-camera.lookAt(0,0,0);
+// ===== Scene =====
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x87CEEB);
+
+const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
+const rig=new THREE.Group();
+rig.add(camera);
+scene.add(rig);
+camera.position.set(0,1.6,3);
 
 // ===== Renderer =====
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth,window.innerHeight);
-renderer.outputEncoding = THREE.sRGBEncoding;
-renderer.xr.enabled = true;
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.xr.enabled=true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
 // ===== Lights =====
 scene.add(new THREE.AmbientLight(0xffffff,1));
-const dir = new THREE.DirectionalLight(0xffffff,0.8);
+const dir=new THREE.DirectionalLight(0xffffff,0.8);
 dir.position.set(5,10,5);
 scene.add(dir);
 
 // ===== Ground =====
-const ground = new THREE.Mesh(
+const ground=new THREE.Mesh(
   new THREE.PlaneGeometry(50,50),
-  new THREE.MeshStandardMaterial({color:0x444444, roughness:0.8, metalness:0})
+  new THREE.MeshStandardMaterial({color:0x444444})
 );
 ground.rotation.x=-Math.PI/2;
 scene.add(ground);
 
-// ===== GLTF Loader =====
-const loader = new GLTFLoader();
-
-// ===== Load Circus Tent =====
-loader.load('models/tadc_tent_beta.glb', gltf=>{
-  const tent = gltf.scene;
-  tent.position.set(0,0,0);
-  tent.scale.set(2,2,2);
-  scene.add(tent);
-});
-
-// ===== Adventure Object Class =====
-class AdventureObject {
+// ===== Object =====
+class AdventureObject{
   constructor(mesh,type){
     this.mesh=mesh;
     this.type=type;
@@ -59,201 +49,265 @@ class AdventureObject {
   }
 }
 
-// ===== Character Class =====
-class Character {
+// ===== Character =====
+class Character{
   constructor(mesh,name){
     this.mesh=mesh;
     this.name=name;
-    this.blocksPlaced=[];
+
+    this.goal="social";
+    this.mood="happy";
+
+    this.personality={
+      talkative:name==="Caine"?0.9:0.5,
+      builder:name==="Caine"?0.8:0.4,
+      playful:name==="Bubble"?0.9:0.3
+    };
+
     this.targetPos=null;
     this.currentStructure=null;
     this.dialogQueue=[];
-    this.knowledge={colorsSeen:new Set(),structuresSeen:[]};
-    this.visible=true;
+
     this.createBubble();
     scene.add(mesh);
   }
 
   createBubble(){
-    const canvas=document.createElement('canvas');
-    canvas.width=1024; canvas.height=256;
-    this.ctx=canvas.getContext('2d');
-    const texture=new THREE.CanvasTexture(canvas);
-    const material=new THREE.MeshBasicMaterial({map:texture,transparent:true});
-    this.bubbleMesh=new THREE.Mesh(new THREE.PlaneGeometry(6,1.5),material);
-    this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
-    scene.add(this.bubbleMesh);
-    this.texture=texture;
-    this.updateBubble("");
+    const c=document.createElement('canvas');
+    c.width=1024;c.height=256;
+    this.ctx=c.getContext('2d');
+    this.tex=new THREE.CanvasTexture(c);
+
+    this.bubble=new THREE.Mesh(
+      new THREE.PlaneGeometry(6,1.5),
+      new THREE.MeshBasicMaterial({map:this.tex,transparent:true})
+    );
+    scene.add(this.bubble);
   }
 
-  updateBubble(text){
-    this.ctx.clearRect(0,0,1024,256);
-    this.ctx.fillStyle="white";
-    this.ctx.font="72px Arial";
-    this.ctx.fillText(text,20,160);
-    this.texture.needsUpdate=true;
-    this.bubbleText=text;
-  }
-
-  moveToward(target,speed=0.07){
-    if(!this.visible) return true;
-    const dir=new THREE.Vector3().subVectors(target,this.mesh.position);
-    const distance=dir.length();
-    if(distance<speed){
-      this.mesh.position.copy(target);
-      return true;
+  speak(t){
+    this.dialogQueue.push(t);
+    if('speechSynthesis' in window){
+      const u=new SpeechSynthesisUtterance(t);
+      u.pitch=this.name==="Bubble"?1.2:1;
+      speechSynthesis.speak(u);
     }
-    dir.normalize();
-    this.mesh.position.add(dir.multiplyScalar(speed));
+  }
+
+  updateBubble(){
+    if(this.dialogQueue.length>0){
+      this.ctx.clearRect(0,0,1024,256);
+      this.ctx.fillStyle="white";
+      this.ctx.font="80px Arial";
+      this.ctx.fillText(this.dialogQueue.shift(),20,150);
+      this.tex.needsUpdate=true;
+    }
+
+    this.bubble.position.set(
+      this.mesh.position.x,
+      this.mesh.position.y+2.5,
+      this.mesh.position.z
+    );
+    this.bubble.lookAt(camera.position);
+  }
+
+  move(t,s=0.1){
+    const d=new THREE.Vector3().subVectors(t,this.mesh.position);
+    if(d.length()<s){this.mesh.position.copy(t);return true;}
+    d.normalize();
+    this.mesh.position.add(d.multiplyScalar(s));
     return false;
   }
-
-  speak(dialog){ if(this.visible) this.dialogQueue.push(dialog); }
-  updateBubblePosition(){
-    if(!this.visible) return;
-    this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
-    this.bubbleMesh.lookAt(camera.position);
-  }
-  nextDialog(){ if(this.dialogQueue.length>0 && this.visible){ const text=this.dialogQueue.shift(); this.updateBubble(text); } }
-  learnColor(color){ this.knowledge.colorsSeen.add(color); }
-  knowsColor(color){ return this.knowledge.colorsSeen.has(color); }
-  learnStructure(structure){ this.knowledge.structuresSeen.push(structure); }
 }
 
 // ===== Characters =====
-const bubbleMesh=new THREE.Mesh(
-  new THREE.SphereGeometry(0.5),
-  new THREE.MeshStandardMaterial({color:0x00ffcc})
+const bubble=new Character(
+  new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color:0x00ffcc})),"Bubble"
 );
-const bubble=new Character(bubbleMesh,"Bubble");
 
-const caineMesh=new THREE.Mesh(
-  new THREE.CapsuleGeometry(0.5,1.5),
-  new THREE.MeshStandardMaterial({color:0xff4444})
+const caine=new Character(
+  new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.5),new THREE.MeshStandardMaterial({color:0xff4444})),"Caine"
 );
-const caine=new Character(caineMesh,"Caine");
+
 caine.mesh.position.set(-5,0.75,-5);
-
-// ===== Object Types & Helper =====
-const objectTypes=[
-  {type:'tree',url:'models/tree.glb',scale:1.5},
-  {type:'couch',url:'models/couch.glb',scale:1},
-  {type:'npc',url:'models/npc.glb',scale:1},
-  {type:'computer',url:'models/computer.glb',scale:1},
-  {type:'balloon',url:'models/balloon.glb',scale:0.5},
-  {type:'pillow',url:'models/pillow.glb',scale:0.5},
-  {type:'toy',url:'models/toy.glb',scale:0.5},
-  {type:'table',url:'models/table.glb',scale:1},
-  {type:'chair',url:'models/chair.glb',scale:1}
-];
-
-function pickObjectType(character){ return objectTypes[Math.floor(Math.random()*objectTypes.length)]; }
-
-async function createObjectOfType(typeObj,pos){
-  return new Promise(resolve=>{
-    loader.load(typeObj.url,gltf=>{
-      const mesh=gltf.scene;
-      mesh.position.copy(pos);
-      mesh.scale.set(typeObj.scale,typeObj.scale,typeObj.scale);
-      scene.add(mesh);
-      resolve(new AdventureObject(mesh,typeObj.type));
-    });
-  });
-}
-
-// ===== Adventure Structures =====
-let structures=[];
-function createNewStructure(basePos){ structures.push({blocks:[], basePos:basePos.clone()}); }
-createNewStructure(new THREE.Vector3(0,0.5,0));
-createNewStructure(new THREE.Vector3(5,0.5,0));
-createNewStructure(new THREE.Vector3(-5,0.5,0));
-
-// ===== Build Logic =====
-async function nextBuildPosition(character){
-  let targetStructure=structures.reduce((min,s)=>s.blocks.length<min.blocks.length?s:min, structures[0]);
-  let xOff = targetStructure.blocks.length%3;
-  let zOff = Math.floor(targetStructure.blocks.length/3)%3;
-  let y = Math.floor(targetStructure.blocks.length/9);
-  let pos=new THREE.Vector3(targetStructure.basePos.x+xOff,0.5+y,targetStructure.basePos.z+zOff);
-  return {pos,targetStructure};
-}
-
-// ===== Player Interaction =====
-let playerPos = new THREE.Vector3();
-function updatePlayerPos(){ playerPos.setFromMatrixPosition(camera.matrixWorld); }
-
-// ===== Characters Thinking =====
 const characters=[caine,bubble];
-let lastActionTime=0;
-async function characterThink(character){
-  if(!character.visible) return;
 
-  // Avoid overlapping
-  const minDist=1.2;
-  characters.forEach(other=>{
-    if(other!==character){
-      const dist=character.mesh.position.distanceTo(other.mesh.position);
-      if(dist<minDist){
-        const away=new THREE.Vector3().subVectors(character.mesh.position,other.mesh.position).normalize().multiplyScalar(0.05);
-        character.mesh.position.add(away);
-      }
+// ===== Block Creator =====
+function createBlock(type,pos){
+  let m;
+
+  if(type==="tent") m=new THREE.Mesh(new THREE.CylinderGeometry(2,2,3,16),new THREE.MeshStandardMaterial({color:0xff0000}));
+  else if(type==="stage") m=new THREE.Mesh(new THREE.BoxGeometry(4,0.5,4),new THREE.MeshStandardMaterial({color:0x222222}));
+  else if(type==="seat") m=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0xAA8844}));
+  else m=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:0xffffff}));
+
+  m.position.copy(pos);
+  return new AdventureObject(m,type);
+}
+
+// ===== Structures =====
+let structures=[];
+
+// ===== SAVE / LOAD =====
+const SAVE_KEY="circus_save";
+
+function save(){
+  const data=structures.map(s=>({
+    type:s.type,
+    pos:s.base.toArray()
+  }));
+  localStorage.setItem(SAVE_KEY,JSON.stringify(data));
+}
+
+function load(){
+  const d=JSON.parse(localStorage.getItem(SAVE_KEY));
+  if(!d) return false;
+
+  d.forEach(s=>{
+    createStructure(new THREE.Vector3().fromArray(s.pos),s.type);
+  });
+
+  return true;
+}
+
+// ===== BUILD FULL CIRCUS =====
+function createStructure(pos,type){
+  const s={base:pos,type};
+  structures.push(s);
+
+  if(type==="tent"){
+    createBlock("tent",pos);
+  }
+
+  if(type==="stage"){
+    createBlock("stage",pos);
+  }
+
+  if(type==="seating"){
+    for(let i=0;i<6;i++){
+      createBlock("seat",pos.clone().add(new THREE.Vector3(i%3,0,i>2?1:0)));
+    }
+  }
+}
+
+// instant build if no save
+if(!load()){
+  createStructure(new THREE.Vector3(0,0.5,0),"tent");
+  createStructure(new THREE.Vector3(6,0.5,0),"stage");
+  createStructure(new THREE.Vector3(-6,0.5,0),"seating");
+  save();
+}
+
+// ===== Voting =====
+let vote=null, voteTimer=0, activeAdventure=null;
+
+function startVote(){
+  vote={
+    options:["tent","stage","seating"],
+    votes:[0,0,0],
+    time:300
+  };
+  caine.speak("Vote for the next adventure!");
+}
+
+function updateVote(playerPos){
+  voteTimer++;
+
+  if(!vote && voteTimer>900){
+    voteTimer=0;
+    startVote();
+  }
+
+  if(vote){
+    vote.time--;
+
+    if(playerPos.distanceTo(caine.mesh.position)<4){
+      vote.votes[Math.floor(Math.random()*3)]+=0.1;
+    }
+
+    if(vote.time<=0){
+      let i=vote.votes.indexOf(Math.max(...vote.votes));
+      activeAdventure=vote.options[i];
+
+      caine.speak("Adventure: "+activeAdventure);
+
+      vote=null;
+    }
+  }
+}
+
+// ===== Player =====
+let playerPos=new THREE.Vector3();
+function updatePlayer(){ playerPos.copy(rig.position); }
+
+// ===== AI =====
+function think(c){
+
+  if(c===caine && !activeAdventure){
+    c.goal="social";
+  }
+
+  if(Math.random()<0.02){
+    c.goal=["explore","social","decorate"][Math.floor(Math.random()*3)];
+  }
+
+  if(c.goal==="explore"){
+    if(!c.targetPos){
+      c.targetPos=new THREE.Vector3((Math.random()-0.5)*10,0.5,(Math.random()-0.5)*10);
+    }
+    c.move(c.targetPos,0.08);
+  }
+
+  if(c.goal==="social"){
+    let o=characters.find(x=>x!==c);
+    c.move(o.mesh.position,0.08);
+  }
+
+  if(c===caine && activeAdventure){
+    if(!c.targetPos){
+      c.targetPos=new THREE.Vector3((Math.random()-0.5)*10,0.5,(Math.random()-0.5)*10);
+    }
+
+    if(c.move(c.targetPos,0.1)){
+      createStructure(c.targetPos,activeAdventure);
+      save();
+      activeAdventure=null;
+      c.speak("Adventure complete!");
+    }
+  }
+
+  c.updateBubble();
+}
+
+// ===== VR =====
+function vr(){
+  const s=renderer.xr.getSession();
+  if(!s)return;
+  s.inputSources.forEach(src=>{
+    if(src.gamepad){
+      rig.position.x+=src.gamepad.axes[2]*0.05;
+      rig.position.z+=-src.gamepad.axes[3]*0.05;
     }
   });
-
-  // Talking to player if nearby
-  const distPlayer = character.mesh.position.distanceTo(playerPos);
-  if(distPlayer<5 && Math.random()<0.05){
-    const phrases=["Hi there! Watch our circus!","Look what we built!","Isn’t this fun?","Come explore!","Check out the adventure!"];
-    character.speak(phrases[Math.floor(Math.random()*phrases.length)]);
-    character.moveToward(playerPos,0.03);
-  }
-
-  // Random dialogue
-  if(Math.random()<0.05){
-    const phrases=[
-      "Let's add more tents!","Look at this balloon!","The audience will love it!","I need more objects here.","This area looks fun!","We could add a tree!","Let's put a computer there!","A pillow here would be nice!","More toys for fun!"
-    ];
-    character.speak(phrases[Math.floor(Math.random()*phrases.length)]);
-  }
-
-  // Moving & building
-  if(!character.targetPos){
-    const {pos,targetStructure}=await nextBuildPosition(character);
-    character.targetPos=pos;
-    character.currentStructure=targetStructure;
-    character.nextType=pickObjectType(character);
-  }
-  const arrived = character.moveToward(character.targetPos,0.07);
-  if(arrived || character.targetPos.distanceTo(character.mesh.position)<0.05){
-    const block=await createObjectOfType(character.nextType,character.targetPos);
-    character.blocksPlaced.push(block);
-    character.currentStructure.blocks.push(block);
-    character.targetPos=null;
-  }
-
-  character.updateBubblePosition();
-  character.nextDialog();
 }
 
-// ===== Animate Loop =====
-function animate(){
-  renderer.setAnimationLoop(async ()=>{
-    updatePlayerPos();
-    const now=Date.now();
-    if(now-lastActionTime>50){ for(const c of characters){ await characterThink(c); } lastActionTime=now; }
-    renderer.render(scene,camera);
-  });
-}
+// ===== LOOP =====
+renderer.setAnimationLoop(()=>{
+  updatePlayer();
+  vr();
+  updateVote(playerPos);
 
-// ===== Resize =====
-window.addEventListener('resize',()=>{
-  camera.aspect=window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth,window.innerHeight);
+  characters.forEach(think);
+
+  renderer.render(scene,camera);
 });
 
-animate();
+// ===== Resize =====
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
 </script>
 </body>
 </html>
