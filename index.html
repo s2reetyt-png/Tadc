@@ -1,180 +1,261 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Caine & Bubble VR Circus Online</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-    #uploadBtn { position: fixed; top: 10px; left: 10px; z-index: 10; }
-  </style>
+<title>VR Circus Online</title>
+<style>body{margin:0;overflow:hidden;}canvas{display:block;}</style>
 </head>
 <body>
-<input type="file" id="uploadBtn" accept="image/*">
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
-import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js';
 
-// ===== Scene, Camera, VR Rig =====
+/////////////////////////
+// BASIC VR SETUP
+/////////////////////////
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
-const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 const rig = new THREE.Group();
 rig.add(camera);
 scene.add(rig);
-camera.position.set(0, 1.6, 3);
+camera.position.set(0,1.6,3);
 
-// ===== Renderer =====
 const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setSize(innerWidth,innerHeight);
 renderer.xr.enabled = true;
-renderer.outputEncoding = THREE.sRGBEncoding;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== Lights =====
 scene.add(new THREE.AmbientLight(0xffffff,1));
-const dir = new THREE.DirectionalLight(0xffffff,0.8);
-dir.position.set(5,10,5);
-scene.add(dir);
+const light = new THREE.DirectionalLight(0xffffff,0.8);
+light.position.set(5,10,5);
+scene.add(light);
 
-// ===== Ground =====
+/////////////////////////
+// GROUND + CIRCUS
+/////////////////////////
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(50,50),
-  new THREE.MeshStandardMaterial({color:0x444444, roughness:0.8})
+  new THREE.PlaneGeometry(60,60),
+  new THREE.MeshStandardMaterial({color:0x444444})
 );
-ground.rotation.x=-Math.PI/2;
+ground.rotation.x = -Math.PI/2;
 scene.add(ground);
 
-// ===== Players =====
+// prebuilt circus
+for(let i=0;i<6;i++){
+  const tent = new THREE.Mesh(
+    new THREE.ConeGeometry(2,3,16),
+    new THREE.MeshStandardMaterial({color:Math.random()*0xffffff})
+  );
+  tent.position.set(Math.cos(i)*10,1.5,Math.sin(i)*10);
+  scene.add(tent);
+}
+
+/////////////////////////
+// PLAYER
+/////////////////////////
+const names = ["Echo","Nova","Fizz","Luna","Pixel","Zig","Bubbles"];
+const myName = names[Math.floor(Math.random()*names.length)];
+
+const player = new THREE.Mesh(
+  new THREE.CapsuleGeometry(0.3,1),
+  new THREE.MeshStandardMaterial({color:0x00aaff})
+);
+scene.add(player);
+
+// name label
+function makeText(text){
+  const c=document.createElement("canvas");
+  c.width=256;c.height=64;
+  const ctx=c.getContext("2d");
+  ctx.fillStyle="white";
+  ctx.font="28px Arial";
+  ctx.fillText(text,10,40);
+  return new THREE.CanvasTexture(c);
+}
+const nameMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(1,0.25),
+  new THREE.MeshBasicMaterial({map:makeText(myName),transparent:true})
+);
+scene.add(nameMesh);
+
+/////////////////////////
+// WEBSOCKET MULTIPLAYER
+/////////////////////////
+const socket = new WebSocket("wss://38e721d4-ef0d-425c-bfcd-1887d6f001ee-00-2hzg027jezh8.worf.replit.dev");
+let id = Math.random().toString(36).slice(2);
 const players = {};
-const localId = Math.floor(Math.random()*1000000);
-const playerName = "Player" + Math.floor(Math.random()*1000);
 
-// ===== Capsule & Name Tag =====
-function createPlayerMesh(name){
-  const mesh = new THREE.Mesh(new THREE.CapsuleGeometry(0.3,1.2), new THREE.MeshStandardMaterial({color:0x8888ff}));
-  const canvas = document.createElement('canvas');
-  canvas.width=512; canvas.height=128;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle='white'; ctx.font='48px Arial'; ctx.fillText(name,20,64);
-  const texture = new THREE.CanvasTexture(canvas);
-  const tag = new THREE.Mesh(new THREE.PlaneGeometry(1.5,0.4), new THREE.MeshBasicMaterial({map:texture,transparent:true}));
-  tag.position.set(0,1.6,0);
-  mesh.add(tag);
-  return {mesh, tag};
-}
+socket.onmessage = e=>{
+  const d = JSON.parse(e.data);
 
-// ===== Simple AI Character =====
-class Character {
-  constructor(name,color, pos){
-    this.name=name; this.color=color; this.mesh=new THREE.Mesh(new THREE.CapsuleGeometry(0.3,1.2), new THREE.MeshStandardMaterial({color}));
-    this.mesh.position.copy(pos);
-    scene.add(this.mesh);
-    this.targetPos=null; this.blocksPlaced=[]; this.knowledge={models:[],structures:[]};
-    this.dialogQueue=[];
-    this.createBubble();
+  if(d.id===id) return;
+
+  if(!players[d.id]){
+    const m = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.3,1),
+      new THREE.MeshStandardMaterial({color:0x00ff88})
+    );
+    scene.add(m);
+    players[d.id]={mesh:m};
   }
 
-  createBubble(){
-    const canvas=document.createElement('canvas'); canvas.width=1024; canvas.height=256;
-    this.ctx=canvas.getContext('2d');
-    const texture=new THREE.CanvasTexture(canvas);
-    const material=new THREE.MeshBasicMaterial({map:texture,transparent:true});
-    this.bubbleMesh=new THREE.Mesh(new THREE.PlaneGeometry(3,1.2),material);
-    this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z);
-    scene.add(this.bubbleMesh);
-    this.texture=texture; this.updateBubble('');
-  }
-  updateBubble(text){ this.ctx.clearRect(0,0,1024,256); this.ctx.fillStyle="white"; this.ctx.font="96px Arial"; this.ctx.fillText(text,20,160); this.texture.needsUpdate=true; }
-  speak(text){ this.dialogQueue.push(text); if('speechSynthesis' in window){ const utter=new SpeechSynthesisUtterance(text); utter.pitch=1; speechSynthesis.speak(utter); } }
-  updateBubblePosition(){ this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2.5,this.mesh.position.z); this.bubbleMesh.lookAt(camera.position); }
-  think(){ 
-    if(Math.random()<0.01){
-      const phrases=["I have a new adventure!","Let's explore!","Check this out!"];
-      this.speak(phrases[Math.floor(Math.random()*phrases.length)]);
-    }
-    this.updateBubblePosition();
+  players[d.id].mesh.position.fromArray(d.pos);
+};
+
+function send(){
+  if(socket.readyState===1){
+    socket.send(JSON.stringify({
+      id,
+      pos: rig.position.toArray()
+    }));
   }
 }
 
-// ===== Instantiate AI =====
-const caine = new Character('Caine',0xff4444,new THREE.Vector3(-2,0.75,-2));
-const bubble = new Character('Bubble',0x00ffcc,new THREE.Vector3(2,0.75,-2));
-
-// ===== Adventure Structures =====
-const adventureStructures = [];
-function createAdventureStructure(pos){
-  const group=new THREE.Group(); group.position.copy(pos);
-  scene.add(group); adventureStructures.push(group);
-  for(let i=0;i<6;i++){
-    const geom=new THREE.CylinderGeometry(Math.random()*0.5+0.2,Math.random()*0.5+0.2,Math.random()+0.5,16);
-    const mesh=new THREE.Mesh(geom,new THREE.MeshStandardMaterial({color:Math.random()*0xffffff}));
-    mesh.position.set(Math.random()*2-1,0.25,Math.random()*2-1); group.add(mesh);
-  }
-  return group;
-}
-// ===== Pre-build Circus instantly =====
-createAdventureStructure(new THREE.Vector3(0,0,0));
-createAdventureStructure(new THREE.Vector3(5,0,0));
-createAdventureStructure(new THREE.Vector3(-5,0,0));
-createAdventureStructure(new THREE.Vector3(0,0,5));
-createAdventureStructure(new THREE.Vector3(0,0,-5));
-
-// ===== Image Upload & Simple 3D Model Generator =====
-document.getElementById('uploadBtn').addEventListener('change',async (e)=>{
-  const file = e.target.files[0];
-  if(!file) return;
-  const img = new Image();
-  img.src = URL.createObjectURL(file);
-  await img.decode();
-  // Simple silhouette → stacked spheres
-  const group = new THREE.Group(); group.position.set(0,0.5,0);
-  scene.add(group); caine.knowledge.models.push(group);
-  for(let y=0;y<3;y++){
-    for(let x=0;x<3;x++){
-      const s = new THREE.Mesh(new THREE.SphereGeometry(0.2), new THREE.MeshStandardMaterial({color:Math.random()*0xffffff}));
-      s.position.set((x-1)*0.3,y*0.3,0); group.add(s);
-    }
-  }
-  caine.speak("New model learned!");
-});
-
-// ===== VR Player Movement =====
-let playerMeshData = createPlayerMesh(playerName);
-rig.add(playerMeshData.mesh);
-
-function handleVRControls(){
-  const session = renderer.xr.getSession(); if(!session) return;
-  session.inputSources.forEach(source=>{
-    if(source.gamepad){
-      const axes = source.gamepad.axes;
-      const speed = 0.05;
-      rig.position.add(new THREE.Vector3(axes[2]*speed,0,-axes[3]*speed).applyEuler(rig.rotation));
-      if(source.handedness==='right'){ rig.rotation.y -= axes[2]*0.05; }
-    }
-  });
-}
-
-// ===== Voice Chat =====
+/////////////////////////
+// VOICE CHAT (WEBRTC)
+/////////////////////////
 let localStream;
-navigator.mediaDevices.getUserMedia({audio:true}).then(stream=>{
-  localStream=stream;
-});
+navigator.mediaDevices.getUserMedia({audio:true})
+.then(stream=>{
+  localStream = stream;
+})
+.catch(()=>console.log("mic blocked"));
 
-// ===== Animate Loop =====
-function animate(){
-  renderer.setAnimationLoop(()=>{
-    handleVRControls();
-    caine.think(); bubble.think();
-    renderer.render(scene,camera);
+/////////////////////////
+// AI SYSTEM
+/////////////////////////
+class AI{
+  constructor(name,color,x,z){
+    this.mesh = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.5,1.5),
+      new THREE.MeshStandardMaterial({color})
+    );
+    this.mesh.position.set(x,0.75,z);
+    scene.add(this.mesh);
+    this.name=name;
+  }
+
+  speak(text){
+    if('speechSynthesis' in window){
+      const u=new SpeechSynthesisUtterance(text);
+      speechSynthesis.speak(u);
+    }
+  }
+
+  think(){
+    // random movement
+    this.mesh.position.x += (Math.random()-0.5)*0.05;
+    this.mesh.position.z += (Math.random()-0.5)*0.05;
+  }
+}
+
+const caine = new AI("Caine",0xff4444,-3,0);
+const bubble = new AI("Bubble",0x00ffcc,3,0);
+
+/////////////////////////
+// AI MEMORY
+/////////////////////////
+let memory = JSON.parse(localStorage.getItem("circusMemory")||"[]");
+
+function remember(item){
+  memory.push(item);
+  localStorage.setItem("circusMemory",JSON.stringify(memory));
+}
+
+/////////////////////////
+// ADVENTURES
+/////////////////////////
+const ideas = ["ball pit","ice cream land","giant slide","npc party","music stage"];
+
+function aiAdventure(){
+  if(Math.random()<0.01){
+    const idea = ideas[Math.floor(Math.random()*ideas.length)];
+    caine.speak("New adventure: "+idea);
+    remember(idea);
+
+    const obj = new THREE.Mesh(
+      new THREE.BoxGeometry(2,2,2),
+      new THREE.MeshStandardMaterial({color:Math.random()*0xffffff})
+    );
+    obj.position.set(Math.random()*10-5,1,Math.random()*10-5);
+    scene.add(obj);
+
+    setTimeout(()=>{
+      bubble.speak("That sounds fun!");
+    },2000);
+  }
+}
+
+/////////////////////////
+// VOTING SYSTEM
+/////////////////////////
+let voteTimer = 0;
+
+function voting(){
+  voteTimer++;
+  if(voteTimer>600){ // ~10 min
+    voteTimer=0;
+    caine.speak("Voting time! What adventure?");
+    
+    setTimeout(()=>{
+      const winner = ideas[Math.floor(Math.random()*ideas.length)];
+      caine.speak("We will do "+winner);
+    },5000);
+  }
+}
+
+/////////////////////////
+// JOIN ANNOUNCEMENT
+/////////////////////////
+setTimeout(()=>{
+  caine.speak("My my, a new person has entered the circus. Look around and enjoy.");
+},6000);
+
+/////////////////////////
+// MOVEMENT FIX
+/////////////////////////
+function controls(){
+  const s = renderer.xr.getSession();
+  if(!s) return;
+
+  s.inputSources.forEach(src=>{
+    if(src.gamepad){
+      const a = src.gamepad.axes;
+      const speed = 0.05;
+
+      rig.position.add(
+        new THREE.Vector3(-a[2]*speed,0,a[3]*speed)
+        .applyEuler(rig.rotation)
+      );
+    }
   });
 }
 
-// ===== Resize =====
-window.addEventListener('resize',()=>{ camera.aspect=window.innerWidth/window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth,window.innerHeight); });
+/////////////////////////
+// LOOP
+/////////////////////////
+renderer.setAnimationLoop(()=>{
+  controls();
 
-animate();
+  player.position.copy(rig.position);
+  nameMesh.position.set(rig.position.x,rig.position.y+2,rig.position.z);
+
+  send();
+  caine.think();
+  bubble.think();
+  aiAdventure();
+  voting();
+
+  renderer.render(scene,camera);
+});
+
+window.addEventListener("resize",()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
 </script>
 </body>
 </html>
