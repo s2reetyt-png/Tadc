@@ -1,29 +1,16 @@
 <!DOCTYPE html>
+
 <html>
 <head>
-  <title>TADC Full Game</title>
+  <title>Caine & Bubble VR Circus Full - Smart AI</title>
   <style>body{margin:0;overflow:hidden;}canvas{display:block;}</style>
 </head>
 <body>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, push, onValue, onDisconnect } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-// ===== FIREBASE =====
-const firebaseConfig = {
-  apiKey: "AIzaSyDa1-37PaFtD0kOuhu7ZIwu1YYK_ZzRHX0",
-  authDomain: "reets-games-fun.firebaseapp.com",
-  databaseURL: "https://reets-games-fun-default-rtdb.firebaseio.com",
-  projectId: "reets-games-fun",
-  storageBucket: "reets-games-fun.firebasestorage.app",
-  messagingSenderId: "38142200968",
-  appId: "1:38142200968:web:6c1764770f2abad926a33d"
-};
-const app = initializeApp(firebaseConfig);
-const db = getDatabase(app);
-
-// ===== SCENE & CAMERA =====
+// ===== Scene & Camera =====
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB);
 const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
@@ -32,209 +19,239 @@ rig.add(camera);
 scene.add(rig);
 camera.position.set(0,1.6,3);
 
-// ===== RENDERER =====
+// ===== Renderer =====
 const renderer = new THREE.WebGLRenderer({antialias:true});
 renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
+document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== LIGHT =====
+// ===== Lights =====
 scene.add(new THREE.AmbientLight(0xffffff,1));
 const dir = new THREE.DirectionalLight(0xffffff,0.8);
 dir.position.set(5,10,5);
 scene.add(dir);
 
-// ===== GROUND =====
+// ===== Ground =====
 const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(50,50),
-  new THREE.MeshStandardMaterial({color:0x444444})
+new THREE.PlaneGeometry(50,50),
+new THREE.MeshStandardMaterial({color:0x444444})
 );
 ground.rotation.x=-Math.PI/2;
 scene.add(ground);
 
-// ===== CHARACTER CLASS =====
+// ===== Globals =====
+let heldObject=null;
+let inventory=[];
+let inventoryIndex=0;
+
+// ===== AdventureObject =====
+class AdventureObject {
+constructor(mesh,type){
+this.mesh=mesh;
+this.type=type;
+scene.add(mesh);
+}
+}
+
+// ===== Character =====
 class Character {
-  constructor(mesh,name){
-    this.mesh=mesh; this.name=name; this.target=new THREE.Vector3();
-    scene.add(mesh);
-  }
-  update(){
-    if(!this.target) return;
-    if(this.mesh.position.distanceTo(this.target)<1){
-      this.target.set((Math.random()-0.5)*10,0.5,(Math.random()-0.5)*10);
-    }
-    const dir=new THREE.Vector3().subVectors(this.target,this.mesh.position).normalize();
-    this.mesh.position.add(dir.multiplyScalar(0.03));
-  }
+constructor(mesh,name){
+this.mesh=mesh; this.name=name;
+this.blocksPlaced=[]; this.targetPos=null;
+this.currentStructure=null;
+this.dialogQueue=[];
+this.visible=true;
+this.createBubble();
+scene.add(mesh);
+}
+createBubble(){
+const canvas=document.createElement('canvas');
+canvas.width=512; canvas.height=128;
+this.ctx=canvas.getContext('2d');
+const texture=new THREE.CanvasTexture(canvas);
+const material=new THREE.MeshBasicMaterial({map:texture,transparent:true});
+this.bubbleMesh=new THREE.Mesh(new THREE.PlaneGeometry(3,1),material);
+scene.add(this.bubbleMesh);
+this.texture=texture;
+}
+updateBubble(text){
+this.ctx.clearRect(0,0,512,128);
+this.ctx.fillStyle="white";
+this.ctx.font="40px Arial";
+this.ctx.fillText(text,10,60);
+this.texture.needsUpdate=true;
+}
+moveToward(target,speed=0.15){
+const dir=new THREE.Vector3().subVectors(target,this.mesh.position);
+if(dir.length()<speed){this.mesh.position.copy(target);return true;}
+dir.normalize(); this.mesh.position.add(dir.multiplyScalar(speed));
+return false;
+}
+speak(text){
+if('speechSynthesis' in window){
+speechSynthesis.speak(new SpeechSynthesisUtterance(text));
+}
+this.updateBubble(text);
+}
+updateBubblePosition(){
+this.bubbleMesh.position.set(this.mesh.position.x,this.mesh.position.y+2,this.mesh.position.z);
+this.bubbleMesh.lookAt(camera.position);
+}
 }
 
-// ===== CAINE & BUBBLE =====
-const caineMesh=new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.5),new THREE.MeshStandardMaterial({color:0xff4444}));
-const caine=new Character(caineMesh,"Caine");
-const bubbleMesh=new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color:0x00ffcc}));
-const bubble=new Character(bubbleMesh,"Bubble");
-scene.remove(caine.mesh); scene.remove(bubble.mesh);
+// ===== Characters =====
+const bubble=new Character(
+new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color:0x00ffcc})),"Bubble"
+);
+const caine=new Character(
+new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.5),new THREE.MeshStandardMaterial({color:0xff4444})),"Caine"
+);
+caine.mesh.position.set(-5,0.75,-5);
 
-// ===== CUTSCENE VARIABLES =====
-let cutsceneActive=true, cutsceneStep=0, cutsceneTimer=0;
-let redCaine, blueCaine, feedObjects=[];
-let computerScreen, screenCanvas, screenCtx, screenTexture;
-let scriptLines=[
-  "Initializing Caine AI...",
-  "Loading behavioral modules...",
-  "Injecting visual data...",
-  "ERROR: instability detected",
-  "Replacing instance...",
-  "Execution complete.",
-  "",
-  "Enter Y/N ?"
+// ===== Types =====
+const objectTypes=[
+'cube','cylinder','sphere','cone','torus','pyramid'
 ];
-let currentLine=0, currentChar=0, typedText="";
+const colors=[0xff0000,0x00ff00,0x0000ff,0xffff00,0xff00ff,0x00ffff];
 
-// ===== CUTSCENE 1 =====
-function startCutscene1(){
-  redCaine = new THREE.Mesh(new THREE.SphereGeometry(1),new THREE.MeshStandardMaterial({color:0xff0000}));
-  redCaine.position.set(0,1,0); scene.add(redCaine);
-}
+// ===== Create Block =====
+function createBlockOfType(type,pos){
+let mesh;
+const color=colors[Math.floor(Math.random()*colors.length)];
 
-// ===== CUTSCENE 2 =====
-function createComputerScreen(){
-  screenCanvas=document.createElement('canvas');
-  screenCanvas.width=1024; screenCanvas.height=512;
-  screenCtx=screenCanvas.getContext('2d');
-  screenTexture=new THREE.CanvasTexture(screenCanvas);
-  const material=new THREE.MeshBasicMaterial({map:screenTexture});
-  computerScreen=new THREE.Mesh(new THREE.PlaneGeometry(6,3),material);
-  computerScreen.position.set(0,2,-5);
-  scene.add(computerScreen);
-}
-function updateComputerText(){
-  if(currentLine>=scriptLines.length) return;
-  if(Math.random()<0.5){
-    const line=scriptLines[currentLine];
-    typedText+=line[currentChar]||"";
-    currentChar++;
-    if(currentChar>line.length){ typedText+="\n"; currentLine++; currentChar=0; }
-  }
-  screenCtx.fillStyle="black";
-  screenCtx.fillRect(0,0,1024,512);
-  screenCtx.fillStyle="lime"; screenCtx.font="28px monospace";
-  typedText.split("\n").forEach((l,i)=>{screenCtx.fillText(l,20,40+i*30)});
-  screenTexture.needsUpdate=true;
+switch(type){
+case 'cube': mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color})); break;
+case 'cylinder': mesh=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,1),new THREE.MeshStandardMaterial({color})); break;
+case 'sphere': mesh=new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color})); break;
+case 'cone': mesh=new THREE.Mesh(new THREE.ConeGeometry(0.5,1),new THREE.MeshStandardMaterial({color})); break;
+case 'torus': mesh=new THREE.Mesh(new THREE.TorusGeometry(0.5,0.2,16,32),new THREE.MeshStandardMaterial({color})); break;
+case 'pyramid': mesh=new THREE.Mesh(new THREE.ConeGeometry(0.7,1,4),new THREE.MeshStandardMaterial({color})); break;
 }
 
-// ===== OBJECTS =====
-const types=['cube','sphere','cylinder'];
-function createBlock(type,pos){
-  let mesh;
-  const color=Math.random()*0xffffff;
-  if(type==='cube') mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color}));
-  if(type==='sphere') mesh=new THREE.Mesh(new THREE.SphereGeometry(0.5),new THREE.MeshStandardMaterial({color}));
-  if(type==='cylinder') mesh=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.5,2),new THREE.MeshStandardMaterial({color}));
-  mesh.position.copy(pos); mesh.userData.isBlock=true; scene.add(mesh);
+mesh.position.copy(pos);
+
+// label
+const canvas=document.createElement('canvas');
+canvas.width=256; canvas.height=64;
+const ctx=canvas.getContext('2d');
+ctx.fillStyle="white";
+ctx.font="28px Arial";
+ctx.fillText(type,10,40);
+const tex=new THREE.CanvasTexture(canvas);
+
+const label=new THREE.Mesh(
+new THREE.PlaneGeometry(1,0.25),
+new THREE.MeshBasicMaterial({map:tex,transparent:true})
+);
+label.position.set(0,1,0);
+mesh.add(label);
+
+return new AdventureObject(mesh,type);
 }
 
-// ===== MULTIPLAYER =====
-const playerId=Math.random().toString(36).substr(2,9);
-function sendPlayer(){
-  const playerRef=ref(db,'players/'+playerId);
-  set(playerRef,{x:rig.position.x,y:rig.position.y,z:rig.position.z});
-  onDisconnect(playerRef).remove();
+// ===== Pickup / Place =====
+function tryPickup(){
+let closest=null;
+let min=2;
+
+scene.traverse(o=>{
+if(o.isMesh){
+const d=o.position.distanceTo(camera.position);
+if(d<min){closest=o;min=d;}
 }
-const others={};
-onValue(ref(db,'players'),snap=>{
-  const data=snap.val()||{};
-  for(let id in data){
-    if(id===playerId) continue;
-    if(!others[id]){
-      const mesh=new THREE.Mesh(new THREE.CapsuleGeometry(0.3,1),new THREE.MeshStandardMaterial({color:0x00ff00}));
-      scene.add(mesh); others[id]=mesh;
-    }
-    others[id].position.set(data[id].x,data[id].y,data[id].z);
-  }
 });
 
-// ===== BUILD WITH CLICK =====
-addEventListener('click',()=>{
-  const pos=rig.position.clone(); pos.y=0.5;
-  const type=types[Math.floor(Math.random()*types.length)];
-  createBlock(type,pos);
-  push(ref(db,'objects'),{type,pos});
+if(closest){
+inventory.push(closest.userData.type || "cube");
+closest.visible=false;
+}
+}
+
+function dropObject(){
+if(inventory.length===0) return;
+const type=inventory[inventoryIndex];
+
+const pos=camera.position.clone()
+.add(new THREE.Vector3(0,0,-2).applyQuaternion(camera.quaternion));
+
+pos.x=Math.round(pos.x);
+pos.y=Math.round(pos.y);
+pos.z=Math.round(pos.z);
+
+createBlockOfType(type,pos);
+}
+
+// ===== Destroy =====
+function destroyBlock(){
+let closest=null; let min=2;
+scene.traverse(o=>{
+if(o.isMesh){
+const d=o.position.distanceTo(camera.position);
+if(d<min){closest=o;min=d;}
+}
+});
+if(closest) scene.remove(closest);
+}
+
+// ===== Inventory =====
+function nextItem(){
+if(inventory.length===0) return;
+inventoryIndex=(inventoryIndex+1)%inventory.length;
+}
+
+// ===== Controls =====
+window.addEventListener('keydown',e=>{
+if(e.key==='e') tryPickup();
+if(e.key==='q') dropObject();
+if(e.key==='f') destroyBlock();
+if(e.key==='r') nextItem();
 });
 
-// ===== CUTSCENE UPDATE =====
-function updateCutscene(){
-  cutsceneTimer++;
-  if(cutsceneStep===0){
-    if(cutsceneTimer%30===0){
-      const cube=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.3,0.3),new THREE.MeshStandardMaterial({color:0xffffff}));
-      cube.position.set((Math.random()-0.5)*6,3,(Math.random()-0.5)*6);
-      scene.add(cube); feedObjects.push(cube);
-    }
-    feedObjects.forEach(obj=>{
-      const dir=new THREE.Vector3().subVectors(redCaine.position,obj.position).normalize();
-      obj.position.add(dir.multiplyScalar(0.05));
-    });
-    if(cutsceneTimer>180){ cutsceneStep=1; cutsceneTimer=0; }
-  }
-  if(cutsceneStep===1){
-    blueCaine=new THREE.Mesh(new THREE.SphereGeometry(1),new THREE.MeshStandardMaterial({color:0x0000ff}));
-    blueCaine.position.set(5,1,0); scene.add(blueCaine);
-    cutsceneStep=2;
-  }
-  if(cutsceneStep===2){
-    const dir=new THREE.Vector3().subVectors(redCaine.position,blueCaine.position).normalize();
-    blueCaine.position.add(dir.multiplyScalar(0.05));
-    if(blueCaine.position.distanceTo(redCaine.position)<1){
-      scene.remove(redCaine); cutsceneStep=3; cutsceneTimer=0;
-    }
-  }
-  if(cutsceneStep===3 && cutsceneTimer>60){
-    feedObjects.forEach(o=>scene.remove(o));
-    scene.remove(blueCaine);
-    createComputerScreen();
-    cutsceneStep=4; cutsceneTimer=0;
-  }
-  if(cutsceneStep===4){
-    updateComputerText();
-    if(currentLine>=scriptLines.length){ cutsceneStep=5; cutsceneTimer=0; }
-  }
-  if(cutsceneStep===5){
-    computerScreen.material.opacity=1-(cutsceneTimer/100);
-    computerScreen.material.transparent=true;
-    if(cutsceneTimer>100){
-      scene.remove(computerScreen); cutsceneActive=false;
-      scene.add(caine.mesh); scene.add(bubble.mesh);
-    }
-  }
+// ===== AI =====
+function characterThink(c){
+if(!c.currentStructure){
+c.currentStructure={
+type:['wall','pillar','tower'][Math.random()*3|0],
+origin:c.mesh.position.clone(),
+step:0
+};
+c.speak("Building "+c.currentStructure.type);
 }
 
-// ===== PLAYER MOVEMENT =====
-const keys={};
-addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
-addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-function move(){
-  const speed=0.1;
-  if(keys['w']) rig.position.z-=speed;
-  if(keys['s']) rig.position.z+=speed;
-  if(keys['a']) rig.position.x-=speed;
-  if(keys['d']) rig.position.x+=speed;
+const s=c.currentStructure;
+let target=new THREE.Vector3();
+
+if(s.type==='pillar'){
+target.set(s.origin.x,s.origin.y+s.step,s.origin.z);
+}
+if(s.type==='wall'){
+const w=5;
+target.set(s.origin.x+(s.step%w),s.origin.y+Math.floor(s.step/w),s.origin.z);
+}
+if(s.type==='tower'){
+target.set(
+s.origin.x+Math.sin(s.step)*2,
+s.origin.y+s.step*0.5,
+s.origin.z+Math.cos(s.step)*2
+);
 }
 
-// ===== ANIMATE LOOP =====
-function animate(){
-  requestAnimationFrame(animate);
-  if(cutsceneActive) updateCutscene();
-  else{ move(); sendPlayer(); caine.update(); bubble.update(); }
-  renderer.render(scene,camera);
+if(c.moveToward(target)){
+createBlockOfType(objectTypes[Math.random()*objectTypes.length|0],target);
+s.step++;
+if(s.step>20) c.currentStructure=null;
 }
-startCutscene1(); animate();
 
-// ===== RESIZE =====
-window.addEventListener('resize',()=>{
-  camera.aspect=window.innerWidth/window.innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth,window.innerHeight);
-});
-</script>
+c.updateBubblePosition();
+}
+
+// ===== Animate =====
+renderer.setAnimationLoop(()=>{
+characterThink(caine);
+characterThink(bubble);
+renderer.render(scene,camera);
+}); </script>
+
 </body>
 </html>
