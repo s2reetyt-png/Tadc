@@ -18,23 +18,13 @@ renderer.xr.enabled=true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== UI =====
-const ui=document.createElement("div");
-ui.style.position="absolute";
-ui.style.top="10px";
-ui.style.left="10px";
-ui.style.color="white";
-ui.style.fontFamily="monospace";
-ui.innerHTML="Loading...";
-document.body.appendChild(ui);
-
 // ===== LIGHT =====
 scene.add(new THREE.AmbientLight(0xffffff,1.2));
 const light=new THREE.DirectionalLight(0xffffff,1);
 light.position.set(5,10,5);
 scene.add(light);
 
-// ===== CIRCUS FLOOR =====
+// ===== FLOOR =====
 const floor=new THREE.Mesh(
 new THREE.CircleGeometry(30,64),
 new THREE.MeshStandardMaterial({color:0xff4444})
@@ -42,17 +32,21 @@ new THREE.MeshStandardMaterial({color:0xff4444})
 floor.rotation.x=-Math.PI/2;
 scene.add(floor);
 
-// ===== CIRCUS WALL =====
+// ===== TENT WALL =====
 const wall=new THREE.Mesh(
 new THREE.CylinderGeometry(30,30,20,32,1,true),
-new THREE.MeshStandardMaterial({
-color:0xffffff,
-side:THREE.DoubleSide,
-wireframe:false
-})
+new THREE.MeshStandardMaterial({color:0xffffff,side:THREE.DoubleSide})
 );
 wall.position.y=10;
 scene.add(wall);
+
+// ===== ROOF =====
+const roof=new THREE.Mesh(
+new THREE.ConeGeometry(30,15,32),
+new THREE.MeshStandardMaterial({color:0xff0000})
+);
+roof.position.y=20;
+scene.add(roof);
 
 // ===== DATA =====
 let blocks=[];
@@ -62,6 +56,25 @@ let inventory=[
 {type:'cone',color:0x0000ff}
 ];
 let inventoryIndex=0;
+
+// ===== MOVEMENT =====
+const keys={};
+addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
+
+function move(){
+const speed=0.08;
+const dir=new THREE.Vector3();
+
+if(keys['w']||keys['arrowup']) dir.z-=1;
+if(keys['s']||keys['arrowdown']) dir.z+=1;
+if(keys['a']||keys['arrowleft']) dir.x-=1;
+if(keys['d']||keys['arrowright']) dir.x+=1;
+
+dir.normalize();
+dir.applyQuaternion(camera.quaternion);
+rig.position.addScaledVector(dir,speed);
+}
 
 // ===== BLOCK =====
 function getGeo(type){
@@ -113,7 +126,6 @@ return closest;
 function pickup(){
 const obj=getClosest();
 if(!obj) return;
-
 inventory.push(obj.userData);
 scene.remove(obj);
 blocks=blocks.filter(b=>b!==obj);
@@ -127,7 +139,6 @@ createBlock(item.type,getForwardPos(),item.color);
 function destroy(){
 const obj=getClosest();
 if(!obj) return;
-
 scene.remove(obj);
 blocks=blocks.filter(b=>b!==obj);
 }
@@ -136,63 +147,87 @@ function nextItem(){
 inventoryIndex=(inventoryIndex+1)%inventory.length;
 }
 
-// ===== SAVE / LOAD =====
-function save(){
-localStorage.setItem("tadc_world",
-JSON.stringify(blocks.map(b=>({
-type:b.userData.type,
-color:b.userData.color,
-pos:b.position
-}))));
-}
-
-function load(){
-blocks.forEach(b=>scene.remove(b));
-blocks=[];
-
-const data=JSON.parse(localStorage.getItem("tadc_world")||"[]");
-data.forEach(d=>{
-createBlock(d.type,new THREE.Vector3(d.pos.x,d.pos.y,d.pos.z),d.color);
-});
-}
-
-// ===== KEYBOARD =====
-window.addEventListener('keydown',e=>{
+// ===== CONTROLS =====
+addEventListener('keydown',e=>{
 if(e.key==='e') pickup();
 if(e.key==='q') place();
 if(e.key==='f') destroy();
 if(e.key==='r') nextItem();
-if(e.key==='k') save();
-if(e.key==='l') load();
 });
 
-// ===== VR HANDS =====
+// ===== VR =====
 function makeController(i){
 const c=renderer.xr.getController(i);
-
-const hand=new THREE.Mesh(
-new THREE.BoxGeometry(0.1,0.1,0.3),
-new THREE.MeshStandardMaterial({color:0xffffff})
-);
-c.add(hand);
-
 c.addEventListener('selectstart',place);
 c.addEventListener('squeezestart',pickup);
-
 scene.add(c);
 }
 makeController(0);
 makeController(1);
 
-// ===== CHARACTERS =====
+// ===== CLOTHES SYSTEM =====
+function addClothes(character){
+character.mesh.children.forEach(c=>character.mesh.remove(c));
+
+const style=Math.floor(Math.random()*4);
+
+// top hat
+if(style===0){
+const hat=new THREE.Mesh(
+new THREE.CylinderGeometry(0.4,0.4,0.6),
+new THREE.MeshStandardMaterial({color:0x000000})
+);
+hat.position.y=1.2;
+character.mesh.add(hat);
+}
+
+// suit
+if(style===1){
+const suit=new THREE.Mesh(
+new THREE.BoxGeometry(1,1,0.5),
+new THREE.MeshStandardMaterial({color:0x222222})
+);
+suit.position.y=0.5;
+character.mesh.add(suit);
+}
+
+// beach
+if(style===2){
+const shirt=new THREE.Mesh(
+new THREE.BoxGeometry(1,1,0.5),
+new THREE.MeshStandardMaterial({color:0xffff00})
+);
+shirt.position.y=0.5;
+character.mesh.add(shirt);
+}
+
+// gangster
+if(style===3){
+const hat=new THREE.Mesh(
+new THREE.CylinderGeometry(0.5,0.5,0.3),
+new THREE.MeshStandardMaterial({color:0x111111})
+);
+hat.position.y=1.2;
+character.mesh.add(hat);
+}
+}
+
+// ===== CHARACTER =====
 class Character{
 constructor(mesh){
 this.mesh=mesh;
 this.target=this.mesh.position.clone();
+this.timer=0;
 scene.add(mesh);
 }
 
 update(){
+this.timer++;
+
+if(this.timer%300===0){
+addClothes(this);
+}
+
 if(this.mesh.position.distanceTo(this.target)<0.5){
 this.target.set(
 (Math.random()-0.5)*20,
@@ -200,11 +235,11 @@ this.target.set(
 (Math.random()-0.5)*20
 );
 
-// build sometimes
-if(Math.random()<0.4){
+// build structure
+for(let i=0;i<3;i++){
 createBlock(
-['cube','cylinder','cone'][Math.floor(Math.random()*3)],
-this.mesh.position.clone().add(new THREE.Vector3(1,0,0)),
+'cube',
+this.mesh.position.clone().add(new THREE.Vector3(i,0,0)),
 Math.random()*0xffffff
 );
 }
@@ -214,7 +249,7 @@ this.mesh.position.lerp(this.target,0.03);
 }
 }
 
-// ===== CAINE + BUBBLE =====
+// ===== CHARACTERS =====
 const caine=new Character(
 new THREE.Mesh(
 new THREE.CapsuleGeometry(0.5,1.5),
@@ -229,24 +264,31 @@ new THREE.MeshStandardMaterial({color:0x00ffff})
 ));
 bubble.mesh.position.set(5,1,-5);
 
+// ===== SIMPLE SOUND =====
+const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+function playTone(){
+const osc=audioCtx.createOscillator();
+osc.frequency.value=220;
+osc.connect(audioCtx.destination);
+osc.start();
+osc.stop(audioCtx.currentTime+0.2);
+}
+setInterval(playTone,2000);
+
 // ===== LOOP =====
 renderer.setAnimationLoop(()=>{
 
-// ghost update
-const item=inventory[inventoryIndex];
-const pos=getForwardPos();
+move();
 
+// animate roof
+roof.scale.y=1+Math.sin(Date.now()*0.002)*0.1;
+
+// ghost
+const item=inventory[inventoryIndex];
 ghost.geometry.dispose();
 ghost.geometry=getGeo(item.type);
 ghost.material.color.set(item.color);
-ghost.position.copy(pos);
-
-// update UI
-ui.innerHTML=
-"Item: "+item.type+
-"<br>Inventory: "+inventory.length+
-"<br>E=pickup Q=place F=delete R=switch"+
-"<br>K=save L=load";
+ghost.position.copy(getForwardPos());
 
 // AI
 caine.update();
