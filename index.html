@@ -8,12 +8,13 @@ scene.background = new THREE.Color(0x87ceeb);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 
-// VR rig (this is the player root)
+// VR PLAYER ROOT
 const rig = new THREE.Group();
 scene.add(rig);
 rig.add(camera);
 camera.position.set(0, 1.6, 0);
 
+// RENDERER
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
@@ -53,26 +54,25 @@ function makeHand(x){
 
 function setupController(i){
   const c = renderer.xr.getController(i);
-  c.add(makeHand(i === 0 ? -0.2 : 0.2));
+  c.add(makeHand(i===0 ? -0.2 : 0.2));
   scene.add(c);
 }
 setupController(0);
 setupController(1);
 
-// ================= VR MOVEMENT =================
+// ================= SIMPLE VR MOVEMENT (WORKS RELIABLY) =================
 let leftGamepad = null;
 
 renderer.xr.getController(0).addEventListener('connected', (e)=>{
-  if(e.data && e.data.handedness === 'left'){
+  if(e.data?.handedness === 'left'){
     leftGamepad = e.data.gamepad;
   }
 });
 
 function updateMovement(){
-  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
 
-  let x = 0, y = 0;
+  let x = 0;
+  let y = 0;
 
   if(leftGamepad){
     x = leftGamepad.axes[2] || 0;
@@ -81,15 +81,18 @@ function updateMovement(){
 
   const speed = 0.06;
 
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  forward.y = 0;
+  forward.normalize();
+
+  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+
   rig.position.addScaledVector(forward, -y * speed);
   rig.position.addScaledVector(right, x * speed);
 
-  // fallback movement so it ALWAYS works
-  if(!leftGamepad){
-    rig.position.addScaledVector(forward, 0.01);
-  }
-
-  // swim
+  // water effect
   if(rig.position.distanceTo(water.position) < 12){
     rig.position.y = 1.3 + Math.sin(Date.now()*0.003)*0.2;
   } else {
@@ -117,6 +120,7 @@ class Character{
 
   update(){
     if(this.mesh.position.distanceTo(this.target) < 0.5){
+
       this.target.set(
         (Math.random()-0.5)*30,
         1,
@@ -134,7 +138,7 @@ class Character{
   }
 }
 
-// CAINE (builds)
+// CAINE (BUILDS)
 const caine = new Character(
   new THREE.Mesh(
     new THREE.CapsuleGeometry(0.5,1.5),
@@ -144,7 +148,7 @@ const caine = new Character(
 );
 caine.mesh.position.set(-5,1,-5);
 
-// BUBBLE (no build)
+// BUBBLE (NO BUILD)
 const bubble = new Character(
   new THREE.Mesh(
     new THREE.SphereGeometry(0.5),
@@ -190,9 +194,9 @@ renderer.setAnimationLoop(()=>{
 });
 
 // ================= RESIZE =================
-addEventListener('resize', ()=>{
+addEventListener('resize',()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(innerWidth,innerHeight);
 });
 </script>
