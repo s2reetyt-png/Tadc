@@ -2,9 +2,9 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-// ===== SETUP =====
+// ===== SCENE =====
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xffccff); // more TADC vibe
+scene.background=new THREE.Color(0xffccff);
 
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
 const rig=new THREE.Group();
@@ -18,53 +18,74 @@ renderer.xr.enabled=true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
+// ===== UI =====
+const ui=document.createElement("div");
+ui.style.position="absolute";
+ui.style.top="10px";
+ui.style.left="10px";
+ui.style.color="white";
+ui.style.fontFamily="monospace";
+ui.innerHTML="Loading...";
+document.body.appendChild(ui);
+
 // ===== LIGHT =====
 scene.add(new THREE.AmbientLight(0xffffff,1.2));
 const light=new THREE.DirectionalLight(0xffffff,1);
 light.position.set(5,10,5);
 scene.add(light);
 
-// ===== GROUND =====
-const ground=new THREE.Mesh(
-new THREE.PlaneGeometry(100,100),
-new THREE.MeshStandardMaterial({color:0x222222})
+// ===== CIRCUS FLOOR =====
+const floor=new THREE.Mesh(
+new THREE.CircleGeometry(30,64),
+new THREE.MeshStandardMaterial({color:0xff4444})
 );
-ground.rotation.x=-Math.PI/2;
-scene.add(ground);
+floor.rotation.x=-Math.PI/2;
+scene.add(floor);
+
+// ===== CIRCUS WALL =====
+const wall=new THREE.Mesh(
+new THREE.CylinderGeometry(30,30,20,32,1,true),
+new THREE.MeshStandardMaterial({
+color:0xffffff,
+side:THREE.DoubleSide,
+wireframe:false
+})
+);
+wall.position.y=10;
+scene.add(wall);
 
 // ===== DATA =====
 let blocks=[];
 let inventory=[
-  {type:'cube',color:0xff0000},
-  {type:'cylinder',color:0x00ff00},
-  {type:'cone',color:0x0000ff}
+{type:'cube',color:0xff0000},
+{type:'cylinder',color:0x00ff00},
+{type:'cone',color:0x0000ff}
 ];
 let inventoryIndex=0;
 
 // ===== BLOCK =====
+function getGeo(type){
+if(type==='cube') return new THREE.BoxGeometry(1,1,1);
+if(type==='cylinder') return new THREE.CylinderGeometry(0.5,0.5,1);
+if(type==='cone') return new THREE.ConeGeometry(0.6,1);
+if(type==='pyramid') return new THREE.ConeGeometry(0.7,1,4);
+}
+
 function createBlock(type,pos,color){
-let geo;
-
-if(type==='cube') geo=new THREE.BoxGeometry(1,1,1);
-if(type==='cylinder') geo=new THREE.CylinderGeometry(0.5,0.5,1);
-if(type==='cone') geo=new THREE.ConeGeometry(0.6,1);
-if(type==='pyramid') geo=new THREE.ConeGeometry(0.7,1,4);
-
-const mat=new THREE.MeshStandardMaterial({color});
-const mesh=new THREE.Mesh(geo,mat);
-
+const mesh=new THREE.Mesh(
+getGeo(type),
+new THREE.MeshStandardMaterial({color})
+);
 mesh.position.copy(pos);
 mesh.userData={type,color};
-
 scene.add(mesh);
 blocks.push(mesh);
 return mesh;
 }
 
-// ===== GHOST PREVIEW =====
-const ghost=new THREE.Mesh(
-new THREE.BoxGeometry(1,1,1),
-new THREE.MeshBasicMaterial({color:0xffffff,opacity:0.3,transparent:true})
+// ===== GHOST =====
+let ghost=new THREE.Mesh(getGeo('cube'),
+new THREE.MeshBasicMaterial({transparent:true,opacity:0.3})
 );
 scene.add(ghost);
 
@@ -93,19 +114,14 @@ function pickup(){
 const obj=getClosest();
 if(!obj) return;
 
-inventory.push({
-type:obj.userData.type,
-color:obj.userData.color
-});
-
+inventory.push(obj.userData);
 scene.remove(obj);
 blocks=blocks.filter(b=>b!==obj);
 }
 
 function place(){
 const item=inventory[inventoryIndex];
-const pos=getForwardPos();
-createBlock(item.type,pos,item.color);
+createBlock(item.type,getForwardPos(),item.color);
 }
 
 function destroy(){
@@ -122,15 +138,18 @@ inventoryIndex=(inventoryIndex+1)%inventory.length;
 
 // ===== SAVE / LOAD =====
 function save(){
-const data=blocks.map(b=>({
+localStorage.setItem("tadc_world",
+JSON.stringify(blocks.map(b=>({
 type:b.userData.type,
 color:b.userData.color,
 pos:b.position
-}));
-localStorage.setItem("tadc_world",JSON.stringify(data));
+}))));
 }
 
 function load(){
+blocks.forEach(b=>scene.remove(b));
+blocks=[];
+
 const data=JSON.parse(localStorage.getItem("tadc_world")||"[]");
 data.forEach(d=>{
 createBlock(d.type,new THREE.Vector3(d.pos.x,d.pos.y,d.pos.z),d.color);
@@ -147,96 +166,91 @@ if(e.key==='k') save();
 if(e.key==='l') load();
 });
 
-// ===== VR CONTROLLERS =====
-const controller1=renderer.xr.getController(0);
-scene.add(controller1);
+// ===== VR HANDS =====
+function makeController(i){
+const c=renderer.xr.getController(i);
 
-controller1.addEventListener('selectstart',place);
-controller1.addEventListener('squeezestart',pickup);
+const hand=new THREE.Mesh(
+new THREE.BoxGeometry(0.1,0.1,0.3),
+new THREE.MeshStandardMaterial({color:0xffffff})
+);
+c.add(hand);
 
-// ===== AI CHARACTER =====
+c.addEventListener('selectstart',place);
+c.addEventListener('squeezestart',pickup);
+
+scene.add(c);
+}
+makeController(0);
+makeController(1);
+
+// ===== CHARACTERS =====
 class Character{
 constructor(mesh){
 this.mesh=mesh;
-this.build=null;
+this.target=this.mesh.position.clone();
 scene.add(mesh);
 }
 
-think(){
-if(!this.build){
-const types=['wall','pillar','tower'];
-this.build={
-type:types[Math.floor(Math.random()*types.length)],
-origin:this.mesh.position.clone(),
-step:0
-};
-}
-
-const b=this.build;
-let pos=new THREE.Vector3();
-let type='cube';
-
-// WALL
-if(b.type==='wall'){
-const w=6,h=3;
-if(b.step>=w*h){this.build=null;return;}
-pos.set(
-b.origin.x+(b.step%w),
-b.origin.y+Math.floor(b.step/w),
-b.origin.z
+update(){
+if(this.mesh.position.distanceTo(this.target)<0.5){
+this.target.set(
+(Math.random()-0.5)*20,
+1,
+(Math.random()-0.5)*20
 );
-type='cube';
-}
 
-// PILLAR
-if(b.type==='pillar'){
-pos.set(b.origin.x,b.origin.y+b.step,b.origin.z);
-if(b.step<4) type='cube';
-else if(b.step===4) type='pyramid';
-else {this.build=null;return;}
-}
-
-// TOWER
-if(b.type==='tower'){
-pos.set(b.origin.x,b.origin.y+b.step*0.8,b.origin.z);
-if(b.step<6) type='cylinder';
-else if(b.step===6) type='cone';
-else {this.build=null;return;}
-}
-
-// MOVE + BUILD
-if(this.mesh.position.distanceTo(pos)>0.1){
-this.mesh.position.lerp(pos,0.1);
-} else {
-createBlock(type,pos,Math.random()*0xffffff);
-b.step++;
-}
+// build sometimes
+if(Math.random()<0.4){
+createBlock(
+['cube','cylinder','cone'][Math.floor(Math.random()*3)],
+this.mesh.position.clone().add(new THREE.Vector3(1,0,0)),
+Math.random()*0xffffff
+);
 }
 }
 
-// ===== CHARACTERS =====
+this.mesh.position.lerp(this.target,0.03);
+}
+}
+
+// ===== CAINE + BUBBLE =====
 const caine=new Character(
 new THREE.Mesh(
 new THREE.CapsuleGeometry(0.5,1.5),
-new THREE.MeshStandardMaterial({color:0xff4444})
+new THREE.MeshStandardMaterial({color:0xff0000})
 ));
-caine.mesh.position.set(-5,0.75,-5);
+caine.mesh.position.set(-5,1,-5);
 
 const bubble=new Character(
 new THREE.Mesh(
 new THREE.SphereGeometry(0.5),
 new THREE.MeshStandardMaterial({color:0x00ffff})
 ));
-bubble.mesh.position.set(5,0.5,-5);
+bubble.mesh.position.set(5,1,-5);
 
 // ===== LOOP =====
 renderer.setAnimationLoop(()=>{
 
-// ghost preview
-ghost.position.copy(getForwardPos());
+// ghost update
+const item=inventory[inventoryIndex];
+const pos=getForwardPos();
 
-caine.think();
-bubble.think();
+ghost.geometry.dispose();
+ghost.geometry=getGeo(item.type);
+ghost.material.color.set(item.color);
+ghost.position.copy(pos);
+
+// update UI
+ui.innerHTML=
+"Item: "+item.type+
+"<br>Inventory: "+inventory.length+
+"<br>E=pickup Q=place F=delete R=switch"+
+"<br>K=save L=load";
+
+// AI
+caine.update();
+bubble.update();
 
 renderer.render(scene,camera);
 });
