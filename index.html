@@ -1,18 +1,10 @@
-<!DOCTYPE html>
-
-<html>
-<head>
-  <title>TADC VR Builder FIXED</title>
-  <style>body{margin:0;overflow:hidden;}canvas{display:block;}</style>
-</head>
-<body>
 <script type="module">
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-// ===== BASIC SETUP =====
+// ===== SETUP =====
 const scene=new THREE.Scene();
-scene.background=new THREE.Color(0x87CEEB);
+scene.background=new THREE.Color(0xffccff); // more TADC vibe
 
 const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
 const rig=new THREE.Group();
@@ -26,114 +18,143 @@ renderer.xr.enabled=true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-scene.add(new THREE.AmbientLight(0xffffff,1));
-const light=new THREE.DirectionalLight(0xffffff,0.8);
+// ===== LIGHT =====
+scene.add(new THREE.AmbientLight(0xffffff,1.2));
+const light=new THREE.DirectionalLight(0xffffff,1);
 light.position.set(5,10,5);
 scene.add(light);
 
 // ===== GROUND =====
 const ground=new THREE.Mesh(
-new THREE.PlaneGeometry(50,50),
-new THREE.MeshStandardMaterial({color:0x444444})
+new THREE.PlaneGeometry(100,100),
+new THREE.MeshStandardMaterial({color:0x222222})
 );
 ground.rotation.x=-Math.PI/2;
 scene.add(ground);
 
-// ===== GLOBALS =====
-let inventory=[];
+// ===== DATA =====
+let blocks=[];
+let inventory=[
+  {type:'cube',color:0xff0000},
+  {type:'cylinder',color:0x00ff00},
+  {type:'cone',color:0x0000ff}
+];
 let inventoryIndex=0;
 
-// ===== BLOCK CREATION =====
-function createLabel(type){
-const c=document.createElement('canvas');
-c.width=256; c.height=64;
-const ctx=c.getContext('2d');
-ctx.fillStyle="white";
-ctx.font="28px Arial";
-ctx.fillText(type,10,40);
-return new THREE.CanvasTexture(c);
-}
-
-function createBlock(type,pos){
+// ===== BLOCK =====
+function createBlock(type,pos,color){
 let geo;
-const mat=new THREE.MeshStandardMaterial({
-color:new THREE.Color().setHSL(Math.random(),0.7,0.5)
-});
 
 if(type==='cube') geo=new THREE.BoxGeometry(1,1,1);
 if(type==='cylinder') geo=new THREE.CylinderGeometry(0.5,0.5,1);
 if(type==='cone') geo=new THREE.ConeGeometry(0.6,1);
 if(type==='pyramid') geo=new THREE.ConeGeometry(0.7,1,4);
 
+const mat=new THREE.MeshStandardMaterial({color});
 const mesh=new THREE.Mesh(geo,mat);
-mesh.position.copy(pos);
-mesh.userData.type=type;
 
-const label=new THREE.Mesh(
-new THREE.PlaneGeometry(1,0.25),
-new THREE.MeshBasicMaterial({map:createLabel(type),transparent:true})
-);
-label.position.y=1;
-mesh.add(label);
+mesh.position.copy(pos);
+mesh.userData={type,color};
 
 scene.add(mesh);
+blocks.push(mesh);
 return mesh;
 }
 
-// ===== PICKUP / PLACE =====
-function getClosest(){
-let closest=null,dist=2;
-scene.traverse(o=>{
-if(o.isMesh && o.userData.type){
-const d=o.position.distanceTo(camera.position);
-if(d<dist){closest=o;dist=d;}
+// ===== GHOST PREVIEW =====
+const ghost=new THREE.Mesh(
+new THREE.BoxGeometry(1,1,1),
+new THREE.MeshBasicMaterial({color:0xffffff,opacity:0.3,transparent:true})
+);
+scene.add(ghost);
+
+// ===== HELPERS =====
+function getForwardPos(){
+const pos=camera.position.clone().add(
+new THREE.Vector3(0,0,-2).applyQuaternion(camera.quaternion)
+);
+pos.x=Math.round(pos.x);
+pos.y=Math.round(pos.y);
+pos.z=Math.round(pos.z);
+return pos;
 }
+
+function getClosest(){
+let closest=null,dist=3;
+blocks.forEach(b=>{
+const d=b.position.distanceTo(camera.position);
+if(d<dist){closest=b;dist=d;}
 });
 return closest;
 }
 
+// ===== ACTIONS =====
 function pickup(){
 const obj=getClosest();
-if(obj){
-inventory.push(obj.userData.type);
+if(!obj) return;
+
+inventory.push({
+type:obj.userData.type,
+color:obj.userData.color
+});
+
 scene.remove(obj);
-}
+blocks=blocks.filter(b=>b!==obj);
 }
 
 function place(){
-if(!inventory.length) return;
-
-const type=inventory[inventoryIndex];
-const pos=camera.position.clone().add(
-new THREE.Vector3(0,0,-2).applyQuaternion(camera.quaternion)
-);
-
-pos.x=Math.round(pos.x);
-pos.y=Math.round(pos.y);
-pos.z=Math.round(pos.z);
-
-createBlock(type,pos);
+const item=inventory[inventoryIndex];
+const pos=getForwardPos();
+createBlock(item.type,pos,item.color);
 }
 
 function destroy(){
 const obj=getClosest();
-if(obj) scene.remove(obj);
+if(!obj) return;
+
+scene.remove(obj);
+blocks=blocks.filter(b=>b!==obj);
 }
 
 function nextItem(){
-if(!inventory.length) return;
 inventoryIndex=(inventoryIndex+1)%inventory.length;
 }
 
-// ===== CONTROLS =====
+// ===== SAVE / LOAD =====
+function save(){
+const data=blocks.map(b=>({
+type:b.userData.type,
+color:b.userData.color,
+pos:b.position
+}));
+localStorage.setItem("tadc_world",JSON.stringify(data));
+}
+
+function load(){
+const data=JSON.parse(localStorage.getItem("tadc_world")||"[]");
+data.forEach(d=>{
+createBlock(d.type,new THREE.Vector3(d.pos.x,d.pos.y,d.pos.z),d.color);
+});
+}
+
+// ===== KEYBOARD =====
 window.addEventListener('keydown',e=>{
 if(e.key==='e') pickup();
 if(e.key==='q') place();
 if(e.key==='f') destroy();
 if(e.key==='r') nextItem();
+if(e.key==='k') save();
+if(e.key==='l') load();
 });
 
-// ===== CHARACTER =====
+// ===== VR CONTROLLERS =====
+const controller1=renderer.xr.getController(0);
+scene.add(controller1);
+
+controller1.addEventListener('selectstart',place);
+controller1.addEventListener('squeezestart',pickup);
+
+// ===== AI CHARACTER =====
 class Character{
 constructor(mesh){
 this.mesh=mesh;
@@ -145,75 +166,78 @@ think(){
 if(!this.build){
 const types=['wall','pillar','tower'];
 this.build={
-type:types,
+type:types[Math.floor(Math.random()*types.length)],
 origin:this.mesh.position.clone(),
 step:0
 };
 }
 
-```
 const b=this.build;
 let pos=new THREE.Vector3();
 let type='cube';
 
-// ===== WALL =====
+// WALL
 if(b.type==='wall'){
-  const w=6,h=3;
-  if(b.step>=w*h){this.build=null;return;}
-
-  pos.set(
-    b.origin.x+(b.step%w),
-    b.origin.y+Math.floor(b.step/w),
-    b.origin.z
-  );
-  type='cube';
+const w=6,h=3;
+if(b.step>=w*h){this.build=null;return;}
+pos.set(
+b.origin.x+(b.step%w),
+b.origin.y+Math.floor(b.step/w),
+b.origin.z
+);
+type='cube';
 }
 
-// ===== PILLAR =====
+// PILLAR
 if(b.type==='pillar'){
-  pos.set(b.origin.x,b.origin.y+b.step,b.origin.z);
-
-  if(b.step<4) type='cube';
-  else if(b.step===4) type='pyramid';
-  else {this.build=null;return;}
+pos.set(b.origin.x,b.origin.y+b.step,b.origin.z);
+if(b.step<4) type='cube';
+else if(b.step===4) type='pyramid';
+else {this.build=null;return;}
 }
 
-// ===== TOWER =====
+// TOWER
 if(b.type==='tower'){
-  pos.set(b.origin.x,b.origin.y+b.step*0.8,b.origin.z);
-
-  if(b.step<6) type='cylinder';
-  else if(b.step===6) type='cone';
-  else {this.build=null;return;}
+pos.set(b.origin.x,b.origin.y+b.step*0.8,b.origin.z);
+if(b.step<6) type='cylinder';
+else if(b.step===6) type='cone';
+else {this.build=null;return;}
 }
 
+// MOVE + BUILD
 if(this.mesh.position.distanceTo(pos)>0.1){
-  this.mesh.position.lerp(pos,0.1);
+this.mesh.position.lerp(pos,0.1);
 } else {
-  createBlock(type,pos);
-  b.step++;
+createBlock(type,pos,Math.random()*0xffffff);
+b.step++;
 }
-```
-
 }
 }
 
 // ===== CHARACTERS =====
 const caine=new Character(
-new THREE.Mesh(new THREE.CapsuleGeometry(0.5,1.5),
-new THREE.MeshStandardMaterial({color:0xff4444}))
-);
+new THREE.Mesh(
+new THREE.CapsuleGeometry(0.5,1.5),
+new THREE.MeshStandardMaterial({color:0xff4444})
+));
 caine.mesh.position.set(-5,0.75,-5);
 
 const bubble=new Character(
-new THREE.Mesh(new THREE.SphereGeometry(0.5),
-new THREE.MeshStandardMaterial({color:0x00ffcc}))
-);
+new THREE.Mesh(
+new THREE.SphereGeometry(0.5),
+new THREE.MeshStandardMaterial({color:0x00ffff})
+));
+bubble.mesh.position.set(5,0.5,-5);
 
 // ===== LOOP =====
 renderer.setAnimationLoop(()=>{
+
+// ghost preview
+ghost.position.copy(getForwardPos());
+
 caine.think();
 bubble.think();
+
 renderer.render(scene,camera);
 });
 
@@ -222,7 +246,5 @@ addEventListener('resize',()=>{
 camera.aspect=innerWidth/innerHeight;
 camera.updateProjectionMatrix();
 renderer.setSize(innerWidth,innerHeight);
-}); </script>
-
-</body>
-</html>
+});
+</script>
