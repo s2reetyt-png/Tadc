@@ -2,305 +2,185 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
 import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/webxr/VRButton.js';
 
-// ===== SCENE =====
-const scene=new THREE.Scene();
-scene.background=new THREE.Color(0xffccff);
+// ================= SCENE =================
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
 
-const camera=new THREE.PerspectiveCamera(75,innerWidth/innerHeight,0.1,1000);
-const rig=new THREE.Group();
-rig.add(camera);
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+
+// VR rig (IMPORTANT: this is what moves in VR)
+const rig = new THREE.Group();
 scene.add(rig);
-camera.position.set(0,1.6,3);
+rig.add(camera);
+camera.position.set(0, 1.6, 0);
 
-const renderer=new THREE.WebGLRenderer({antialias:true});
-renderer.setSize(innerWidth,innerHeight);
-renderer.xr.enabled=true;
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
 document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
-// ===== LIGHT =====
-scene.add(new THREE.AmbientLight(0xffffff,1.2));
-const light=new THREE.DirectionalLight(0xffffff,1);
-light.position.set(5,10,5);
-scene.add(light);
+// ================= LIGHT =================
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-// ===== FLOOR =====
-const floor=new THREE.Mesh(
-new THREE.CircleGeometry(30,64),
-new THREE.MeshStandardMaterial({color:0xff4444})
+const sunLight = new THREE.DirectionalLight(0xffffff, 1);
+scene.add(sunLight);
+
+// ================= FLOOR =================
+const floor = new THREE.Mesh(
+  new THREE.CircleGeometry(50, 64),
+  new THREE.MeshStandardMaterial({ color: 0xff4444 })
 );
-floor.rotation.x=-Math.PI/2;
+floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// ===== TENT WALL =====
-const wall=new THREE.Mesh(
-new THREE.CylinderGeometry(30,30,20,32,1,true),
-new THREE.MeshStandardMaterial({color:0xffffff,side:THREE.DoubleSide})
+// ================= WATER (BEACH AREA) =================
+const water = new THREE.Mesh(
+  new THREE.CircleGeometry(15, 64),
+  new THREE.MeshStandardMaterial({ color: 0x3399ff, transparent: true, opacity: 0.6 })
 );
-wall.position.y=10;
-scene.add(wall);
+water.rotation.x = -Math.PI / 2;
+water.position.set(20, 0.1, 0);
+scene.add(water);
 
-// ===== ROOF =====
-const roof=new THREE.Mesh(
-new THREE.ConeGeometry(30,15,32),
-new THREE.MeshStandardMaterial({color:0xff0000})
+// ================= SUN / MOON =================
+const sun = new THREE.Mesh(
+  new THREE.SphereGeometry(2),
+  new THREE.MeshBasicMaterial({ color: 0xffff00 })
 );
-roof.position.y=20;
-scene.add(roof);
+scene.add(sun);
 
-// ===== DATA =====
-let blocks=[];
-let inventory=[
-{type:'cube',color:0xff0000},
-{type:'cylinder',color:0x00ff00},
-{type:'cone',color:0x0000ff}
-];
-let inventoryIndex=0;
-
-// ===== MOVEMENT =====
-const keys={};
-addEventListener('keydown',e=>keys[e.key.toLowerCase()]=true);
-addEventListener('keyup',e=>keys[e.key.toLowerCase()]=false);
-
-function move(){
-const speed=0.08;
-const dir=new THREE.Vector3();
-
-if(keys['w']||keys['arrowup']) dir.z-=1;
-if(keys['s']||keys['arrowdown']) dir.z+=1;
-if(keys['a']||keys['arrowleft']) dir.x-=1;
-if(keys['d']||keys['arrowright']) dir.x+=1;
-
-dir.normalize();
-dir.applyQuaternion(camera.quaternion);
-rig.position.addScaledVector(dir,speed);
-}
-
-// ===== BLOCK =====
-function getGeo(type){
-if(type==='cube') return new THREE.BoxGeometry(1,1,1);
-if(type==='cylinder') return new THREE.CylinderGeometry(0.5,0.5,1);
-if(type==='cone') return new THREE.ConeGeometry(0.6,1);
-if(type==='pyramid') return new THREE.ConeGeometry(0.7,1,4);
-}
-
-function createBlock(type,pos,color){
-const mesh=new THREE.Mesh(
-getGeo(type),
-new THREE.MeshStandardMaterial({color})
+const moon = new THREE.Mesh(
+  new THREE.SphereGeometry(1.5),
+  new THREE.MeshBasicMaterial({ color: 0xccccff })
 );
-mesh.position.copy(pos);
-mesh.userData={type,color};
-scene.add(mesh);
-blocks.push(mesh);
-return mesh;
+scene.add(moon);
+
+// ================= ROLLER COASTER =================
+const points = [];
+for (let i = 0; i < 25; i++) {
+  points.push(new THREE.Vector3(
+    Math.sin(i * 0.4) * 12,
+    Math.cos(i * 0.3) * 5 + 6,
+    Math.cos(i * 0.4) * 12
+  ));
 }
 
-// ===== GHOST =====
-let ghost=new THREE.Mesh(getGeo('cube'),
-new THREE.MeshBasicMaterial({transparent:true,opacity:0.3})
+const curve = new THREE.CatmullRomCurve3(points, true);
+
+const track = new THREE.Mesh(
+  new THREE.TubeGeometry(curve, 200, 0.25, 8, true),
+  new THREE.MeshStandardMaterial({ color: 0x00ffcc })
 );
-scene.add(ghost);
+scene.add(track);
 
-// ===== HELPERS =====
-function getForwardPos(){
-const pos=camera.position.clone().add(
-new THREE.Vector3(0,0,-2).applyQuaternion(camera.quaternion)
+// cart
+const cart = new THREE.Mesh(
+  new THREE.BoxGeometry(1, 0.5, 1),
+  new THREE.MeshStandardMaterial({ color: 0xff0000 })
 );
-pos.x=Math.round(pos.x);
-pos.y=Math.round(pos.y);
-pos.z=Math.round(pos.z);
-return pos;
-}
+scene.add(cart);
 
-function getClosest(){
-let closest=null,dist=3;
-blocks.forEach(b=>{
-const d=b.position.distanceTo(camera.position);
-if(d<dist){closest=b;dist=d;}
-});
-return closest;
-}
+// ================= VR RIDE STATE =================
+let ride = false;
+let t = 0;
+let rideOffset = new THREE.Vector3();
 
-// ===== ACTIONS =====
-function pickup(){
-const obj=getClosest();
-if(!obj) return;
-inventory.push(obj.userData);
-scene.remove(obj);
-blocks=blocks.filter(b=>b!==obj);
-}
+// ================= INPUT =================
+const keys = {};
+addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
 
-function place(){
-const item=inventory[inventoryIndex];
-createBlock(item.type,getForwardPos(),item.color);
-}
+  // toggle ride
+  if (e.key.toLowerCase() === 'c') {
+    ride = !ride;
 
-function destroy(){
-const obj=getClosest();
-if(!obj) return;
-scene.remove(obj);
-blocks=blocks.filter(b=>b!==obj);
-}
-
-function nextItem(){
-inventoryIndex=(inventoryIndex+1)%inventory.length;
-}
-
-// ===== CONTROLS =====
-addEventListener('keydown',e=>{
-if(e.key==='e') pickup();
-if(e.key==='q') place();
-if(e.key==='f') destroy();
-if(e.key==='r') nextItem();
+    if (ride) {
+      const pos = curve.getPointAt(t);
+      rideOffset.copy(rig.position).sub(pos);
+    }
+  }
 });
 
-// ===== VR =====
-function makeController(i){
-const c=renderer.xr.getController(i);
-c.addEventListener('selectstart',place);
-c.addEventListener('squeezestart',pickup);
-scene.add(c);
+addEventListener('keyup', e => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+// ================= MOVEMENT =================
+function move() {
+  if (ride) return;
+
+  const speed = 0.08;
+  const dir = new THREE.Vector3();
+
+  if (keys['w']) dir.z -= 1;
+  if (keys['s']) dir.z += 1;
+  if (keys['a']) dir.x -= 1;
+  if (keys['d']) dir.x += 1;
+
+  dir.normalize();
+  dir.applyQuaternion(camera.quaternion);
+
+  rig.position.addScaledVector(dir, speed);
+
+  // swim slow zone
+  const distToWater = rig.position.distanceTo(water.position);
+  if (distToWater < 12) {
+    rig.position.y = 1.4 + Math.sin(Date.now() * 0.003) * 0.2;
+  } else {
+    rig.position.y = 0;
+  }
+}
+
+// ================= VR CONTROLLERS =================
+function makeController(i) {
+  const c = renderer.xr.getController(i);
+
+  c.addEventListener('selectstart', () => {});
+  scene.add(c);
 }
 makeController(0);
 makeController(1);
 
-// ===== CLOTHES SYSTEM =====
-function addClothes(character){
-character.mesh.children.forEach(c=>character.mesh.remove(c));
+// ================= LOOP =================
+renderer.setAnimationLoop(() => {
 
-const style=Math.floor(Math.random()*4);
+  move();
 
-// top hat
-if(style===0){
-const hat=new THREE.Mesh(
-new THREE.CylinderGeometry(0.4,0.4,0.6),
-new THREE.MeshStandardMaterial({color:0x000000})
-);
-hat.position.y=1.2;
-character.mesh.add(hat);
-}
+  // coaster progress
+  t += 0.0015;
+  if (t > 1) t = 0;
 
-// suit
-if(style===1){
-const suit=new THREE.Mesh(
-new THREE.BoxGeometry(1,1,0.5),
-new THREE.MeshStandardMaterial({color:0x222222})
-);
-suit.position.y=0.5;
-character.mesh.add(suit);
-}
+  const pos = curve.getPointAt(t);
+  const next = curve.getPointAt((t + 0.01) % 1);
 
-// beach
-if(style===2){
-const shirt=new THREE.Mesh(
-new THREE.BoxGeometry(1,1,0.5),
-new THREE.MeshStandardMaterial({color:0xffff00})
-);
-shirt.position.y=0.5;
-character.mesh.add(shirt);
-}
+  cart.position.copy(pos);
 
-// gangster
-if(style===3){
-const hat=new THREE.Mesh(
-new THREE.CylinderGeometry(0.5,0.5,0.3),
-new THREE.MeshStandardMaterial({color:0x111111})
-);
-hat.position.y=1.2;
-character.mesh.add(hat);
-}
-}
+  // 🎢 VR RIDE FIX (IMPORTANT)
+  if (ride) {
+    rig.position.copy(pos).add(rideOffset);
+    rig.lookAt(next);
+  }
 
-// ===== CHARACTER =====
-class Character{
-constructor(mesh){
-this.mesh=mesh;
-this.target=this.mesh.position.clone();
-this.timer=0;
-scene.add(mesh);
-}
+  // 🌞 day/night cycle
+  const time = Date.now() * 0.0001;
 
-update(){
-this.timer++;
+  sun.position.set(Math.sin(time) * 30, Math.cos(time) * 30, 0);
+  moon.position.set(-Math.sin(time) * 30, -Math.cos(time) * 30, 0);
 
-if(this.timer%300===0){
-addClothes(this);
-}
+  sunLight.position.copy(sun.position);
+  sunLight.intensity = Math.max(0, sun.position.y / 20);
 
-if(this.mesh.position.distanceTo(this.target)<0.5){
-this.target.set(
-(Math.random()-0.5)*20,
-1,
-(Math.random()-0.5)*20
-);
+  // 🌊 water animation
+  water.material.opacity = 0.5 + Math.sin(Date.now() * 0.002) * 0.2;
 
-// build structure
-for(let i=0;i<3;i++){
-createBlock(
-'cube',
-this.mesh.position.clone().add(new THREE.Vector3(i,0,0)),
-Math.random()*0xffffff
-);
-}
-}
-
-this.mesh.position.lerp(this.target,0.03);
-}
-}
-
-// ===== CHARACTERS =====
-const caine=new Character(
-new THREE.Mesh(
-new THREE.CapsuleGeometry(0.5,1.5),
-new THREE.MeshStandardMaterial({color:0xff0000})
-));
-caine.mesh.position.set(-5,1,-5);
-
-const bubble=new Character(
-new THREE.Mesh(
-new THREE.SphereGeometry(0.5),
-new THREE.MeshStandardMaterial({color:0x00ffff})
-));
-bubble.mesh.position.set(5,1,-5);
-
-// ===== SIMPLE SOUND =====
-const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-function playTone(){
-const osc=audioCtx.createOscillator();
-osc.frequency.value=220;
-osc.connect(audioCtx.destination);
-osc.start();
-osc.stop(audioCtx.currentTime+0.2);
-}
-setInterval(playTone,2000);
-
-// ===== LOOP =====
-renderer.setAnimationLoop(()=>{
-
-move();
-
-// animate roof
-roof.scale.y=1+Math.sin(Date.now()*0.002)*0.1;
-
-// ghost
-const item=inventory[inventoryIndex];
-ghost.geometry.dispose();
-ghost.geometry=getGeo(item.type);
-ghost.material.color.set(item.color);
-ghost.position.copy(getForwardPos());
-
-// AI
-caine.update();
-bubble.update();
-
-renderer.render(scene,camera);
+  renderer.render(scene, camera);
 });
 
-// ===== RESIZE =====
-addEventListener('resize',()=>{
-camera.aspect=innerWidth/innerHeight;
-camera.updateProjectionMatrix();
-renderer.setSize(innerWidth,innerHeight);
+// ================= RESIZE =================
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
 });
 </script>
