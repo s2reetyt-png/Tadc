@@ -13,10 +13,8 @@ const rig = new THREE.Group();
 const head = new THREE.Group();
 rig.add(head);
 head.add(camera);
-camera.position.set(0, 0, 0);
-
 scene.add(rig);
-rig.position.set(0, 0, 0);
+camera.position.set(0, 0, 0);
 
 // ================= RENDERER =================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -29,18 +27,18 @@ document.body.appendChild(VRButton.createButton(renderer));
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 scene.add(new THREE.DirectionalLight(0xffffff, 1));
 
-// ================= GROUND =================
+// ================= WORLD =================
 const floor = new THREE.Mesh(
-  new THREE.PlaneGeometry(100,100),
+  new THREE.PlaneGeometry(100, 100),
   new THREE.MeshStandardMaterial({ color: 0x44aa44 })
 );
-floor.rotation.x = -Math.PI/2;
+floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// ================= OBJECTS YOU CAN PICK UP =================
+// ================= PICKUP OBJECTS =================
 const objects = [];
 
-function makePickup(pos){
+function spawnBox(pos){
   const m = new THREE.Mesh(
     new THREE.BoxGeometry(0.4,0.4,0.4),
     new THREE.MeshStandardMaterial({ color: Math.random()*0xffffff })
@@ -50,65 +48,192 @@ function makePickup(pos){
   objects.push(m);
 }
 
-for(let i=0;i<10;i++){
-  makePickup(new THREE.Vector3((Math.random()-0.5)*10,1,(Math.random()-0.5)*10));
+for(let i=0;i<8;i++){
+  spawnBox(new THREE.Vector3((Math.random()-0.5)*10,1,(Math.random()-0.5)*10));
 }
 
-// ================= VR HANDS (REAL TRACKED CONTROLLERS) =================
+// ================= CONTROLLERS + HANDS =================
 const controller0 = renderer.xr.getController(0);
 const controller1 = renderer.xr.getController(1);
-
 scene.add(controller0);
 scene.add(controller1);
 
-// visual hands that FOLLOW controllers
-function makeHand(color){
-  const hand = new THREE.Mesh(
-    new THREE.BoxGeometry(0.1,0.1,0.2),
-    new THREE.MeshStandardMaterial({ color })
-  );
-  return hand;
-}
+const grip0 = renderer.xr.getControllerGrip(0);
+const grip1 = renderer.xr.getControllerGrip(1);
+scene.add(grip0);
+scene.add(grip1);
 
-const handMesh0 = makeHand(0xffffff);
-const handMesh1 = makeHand(0xffffff);
+const handMat = new THREE.MeshStandardMaterial({ color:0xffffff });
+const handGeo = new THREE.BoxGeometry(0.1,0.1,0.3);
 
-controller0.add(handMesh0);
-controller1.add(handMesh1);
+grip0.add(new THREE.Mesh(handGeo, handMat));
+grip1.add(new THREE.Mesh(handGeo, handMat));
 
-// ================= GRAB SYSTEM =================
+// ================= PICKUP SYSTEM =================
 let held = [null, null];
 
-function tryGrab(i, controller){
-  const origin = new THREE.Vector3();
-  controller.getWorldPosition(origin);
+function grab(i, controller){
+  const p = new THREE.Vector3();
+  controller.getWorldPosition(p);
 
   let closest = null;
-  let dist = 1.2;
+  let best = 1.2;
 
   for(const obj of objects){
-    const d = obj.position.distanceTo(origin);
-    if(d < dist){
+    const d = obj.position.distanceTo(p);
+    if(d < best){
       closest = obj;
-      dist = d;
+      best = d;
     }
   }
 
-  if(closest){
-    held[i] = closest;
-  }
+  if(closest) held[i] = closest;
 }
 
 function release(i){
   held[i] = null;
 }
 
-// controller events
-controller0.addEventListener('selectstart', ()=>tryGrab(0, controller0));
+controller0.addEventListener('selectstart', ()=>grab(0,controller0));
+controller1.addEventListener('selectstart', ()=>grab(1,controller1));
 controller0.addEventListener('selectend', ()=>release(0));
-
-controller1.addEventListener('selectstart', ()=>tryGrab(1, controller1));
 controller1.addEventListener('selectend', ()=>release(1));
+
+// ================= VR MOVEMENT =================
+let leftPad = null;
+
+controller0.addEventListener('connected', (e)=>{
+  if(e.data?.handedness === 'left'){
+    leftPad = e.data.gamepad;
+  }
+});
+
+function moveVR(){
+  if(!leftPad) return;
+
+  const x = leftPad.axes[2] || 0;
+  const y = leftPad.axes[3] || 0;
+
+  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+  forward.y = 0;
+  forward.normalize();
+
+  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+  right.y = 0;
+  right.normalize();
+
+  rig.position.addScaledVector(forward, -y * 0.06);
+  rig.position.addScaledVector(right, x * 0.06);
+}
+
+// ================= CAINE + BUBBLE =================
+function makeLabel(){
+  const c = document.createElement("canvas");
+  c.width = 256;
+  c.height = 128;
+  const ctx = c.getContext("2d");
+
+  const tex = new THREE.CanvasTexture(c);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex }));
+
+  sprite.scale.set(2,1,1);
+
+  return {c,ctx,tex,sprite,text:""};
+}
+
+function setLabel(label, text){
+  const ctx = label.ctx;
+  ctx.clearRect(0,0,256,128);
+  ctx.fillStyle = "white";
+  ctx.fillRect(0,0,256,128);
+  ctx.fillStyle = "black";
+  ctx.font = "20px Arial";
+  ctx.fillText(text,10,60);
+  label.tex.needsUpdate = true;
+}
+
+class Character{
+  constructor(mesh, canBuild){
+    this.mesh = mesh;
+    this.canBuild = canBuild;
+    this.target = mesh.position.clone();
+    scene.add(mesh);
+  }
+
+  update(){
+    if(this.mesh.position.distanceTo(this.target)<0.5){
+      this.target.set(
+        (Math.random()-0.5)*20,
+        1,
+        (Math.random()-0.5)*20
+      );
+
+      if(this.canBuild){
+        for(let i=0;i<3;i++){
+          const b = new THREE.Mesh(
+            new THREE.BoxGeometry(1,1,1),
+            new THREE.MeshStandardMaterial({ color:0xff4444 })
+          );
+          b.position.copy(this.mesh.position).add(new THREE.Vector3(i,0,0));
+          scene.add(b);
+        }
+      }
+    }
+    this.mesh.position.lerp(this.target,0.03);
+  }
+}
+
+const caine = new Character(
+  new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.5,1.5),
+    new THREE.MeshStandardMaterial({ color:0xff0000 })
+  ),
+  true
+);
+caine.mesh.position.set(-5,1,-5);
+
+const bubble = new Character(
+  new THREE.Mesh(
+    new THREE.SphereGeometry(0.5),
+    new THREE.MeshStandardMaterial({ color:0x00ffff })
+  ),
+  false
+);
+bubble.mesh.position.set(5,1,-5);
+
+// labels
+const caineLabel = makeLabel();
+const bubbleLabel = makeLabel();
+scene.add(caineLabel.sprite);
+scene.add(bubbleLabel.sprite);
+
+// ================= CHAT =================
+function caineTalk(msg){
+  msg = msg.toLowerCase();
+  if(msg.includes("build")) return "Building now.";
+  if(msg.includes("hi")) return "Hello.";
+  return "Processing...";
+}
+
+function bubbleTalk(){
+  const r = ["BLOOP","NO","OK","WHY?"];
+  return r[Math.floor(Math.random()*r.length)];
+}
+
+// UI
+const ui = document.createElement("div");
+ui.style = "position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:9999";
+ui.innerHTML = `
+<input id="t" placeholder="Talk..." />
+<button id="b">Send</button>
+`;
+document.body.appendChild(ui);
+
+document.getElementById("b").onclick = ()=>{
+  const v = document.getElementById("t").value;
+  setLabel(caineLabel,"Caine: "+caineTalk(v));
+  setLabel(bubbleLabel,"Bubble: "+bubbleTalk());
+};
 
 // ================= COASTER =================
 let t = 0;
@@ -127,65 +252,32 @@ const cart = new THREE.Mesh(
 );
 scene.add(cart);
 
-// ================= MOVEMENT (LEFT STICK SIMPLE) =================
-let leftGamepad = null;
-
-controller0.addEventListener('connected', (e)=>{
-  if(e.data?.handedness === 'left'){
-    leftGamepad = e.data.gamepad;
-  }
-});
-
-function updateMovement(){
-
-  if(leftGamepad){
-    const x = leftGamepad.axes[2] || 0;
-    const y = leftGamepad.axes[3] || 0;
-
-    const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-    forward.y = 0;
-    forward.normalize();
-
-    const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
-    right.y = 0;
-    right.normalize();
-
-    rig.position.addScaledVector(forward, -y * 0.06);
-    rig.position.addScaledVector(right, x * 0.06);
-  }
-}
-
 // ================= LOOP =================
 renderer.setAnimationLoop(()=>{
 
-  updateMovement();
+  moveVR();
 
-  // coaster
   t += 0.0015;
-  if(t > 1) t = 0;
+  if(t>1) t=0;
 
-  const pos = path.getPointAt(t);
-  cart.position.copy(pos);
+  cart.position.copy(path.getPointAt(t));
 
-  // update held objects (follow hands)
-  controller0.getWorldPosition(new THREE.Vector3()).toArray;
-  controller1.getWorldPosition(new THREE.Vector3()).toArray;
+  caine.update();
+  bubble.update();
 
-  if(held[0]){
-    controller0.getWorldPosition(held[0].position);
-  }
+  caineLabel.sprite.position.copy(caine.mesh.position).add(new THREE.Vector3(0,2,0));
+  bubbleLabel.sprite.position.copy(bubble.mesh.position).add(new THREE.Vector3(0,2,0));
 
-  if(held[1]){
-    controller1.getWorldPosition(held[1].position);
-  }
+  if(held[0]) controller0.getWorldPosition(held[0].position);
+  if(held[1]) controller1.getWorldPosition(held[1].position);
 
   renderer.render(scene,camera);
 });
 
 // ================= RESIZE =================
 addEventListener('resize',()=>{
-  camera.aspect = innerWidth/innerHeight;
+  camera.aspect=innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
+  renderer.setSize(innerWidth,innerHeight);
 });
 </script>
