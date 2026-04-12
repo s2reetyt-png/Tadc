@@ -4,11 +4,10 @@ import { VRButton } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js
 
 // ================= SCENE =================
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87ceeb);
+scene.background = new THREE.Color(0xffc0ff);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 
-// VR rig (IMPORTANT: this is what moves in VR)
 const rig = new THREE.Group();
 scene.add(rig);
 rig.add(camera);
@@ -21,26 +20,26 @@ document.body.appendChild(renderer.domElement);
 document.body.appendChild(VRButton.createButton(renderer));
 
 // ================= LIGHT =================
-scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
 const sunLight = new THREE.DirectionalLight(0xffffff, 1);
 scene.add(sunLight);
 
 // ================= FLOOR =================
 const floor = new THREE.Mesh(
-  new THREE.CircleGeometry(50, 64),
+  new THREE.CircleGeometry(60, 64),
   new THREE.MeshStandardMaterial({ color: 0xff4444 })
 );
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// ================= WATER (BEACH AREA) =================
+// ================= BEACH =================
 const water = new THREE.Mesh(
   new THREE.CircleGeometry(15, 64),
   new THREE.MeshStandardMaterial({ color: 0x3399ff, transparent: true, opacity: 0.6 })
 );
 water.rotation.x = -Math.PI / 2;
-water.position.set(20, 0.1, 0);
+water.position.set(25, 0.1, 0);
 scene.add(water);
 
 // ================= SUN / MOON =================
@@ -57,16 +56,16 @@ const moon = new THREE.Mesh(
 scene.add(moon);
 
 // ================= ROLLER COASTER =================
-const points = [];
+const pts = [];
 for (let i = 0; i < 25; i++) {
-  points.push(new THREE.Vector3(
+  pts.push(new THREE.Vector3(
     Math.sin(i * 0.4) * 12,
     Math.cos(i * 0.3) * 5 + 6,
     Math.cos(i * 0.4) * 12
   ));
 }
 
-const curve = new THREE.CatmullRomCurve3(points, true);
+const curve = new THREE.CatmullRomCurve3(pts, true);
 
 const track = new THREE.Mesh(
   new THREE.TubeGeometry(curve, 200, 0.25, 8, true),
@@ -74,43 +73,53 @@ const track = new THREE.Mesh(
 );
 scene.add(track);
 
-// cart
 const cart = new THREE.Mesh(
   new THREE.BoxGeometry(1, 0.5, 1),
   new THREE.MeshStandardMaterial({ color: 0xff0000 })
 );
 scene.add(cart);
 
-// ================= VR RIDE STATE =================
-let ride = false;
-let t = 0;
-let rideOffset = new THREE.Vector3();
+// ================= FERRIS WHEEL =================
+const wheel = new THREE.Group();
+scene.add(wheel);
 
-// ================= INPUT =================
-const keys = {};
-addEventListener('keydown', e => {
-  keys[e.key.toLowerCase()] = true;
+const ring = new THREE.Mesh(
+  new THREE.TorusGeometry(5, 0.3, 16, 100),
+  new THREE.MeshStandardMaterial({ color: 0xffff00 })
+);
+wheel.add(ring);
 
-  // toggle ride
-  if (e.key.toLowerCase() === 'c') {
-    ride = !ride;
+for (let i = 0; i < 8; i++) {
+  const seat = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 0.5, 1),
+    new THREE.MeshStandardMaterial({ color: 0xff00ff })
+  );
+  seat.position.set(Math.cos(i * Math.PI / 4) * 5, Math.sin(i * Math.PI / 4) * 5, 0);
+  wheel.add(seat);
+}
+wheel.position.set(-20, 6, 0);
 
-    if (ride) {
-      const pos = curve.getPointAt(t);
-      rideOffset.copy(rig.position).sub(pos);
-    }
-  }
-});
+// ================= VR HANDS =================
+function makeController(i) {
+  const c = renderer.xr.getController(i);
 
-addEventListener('keyup', e => {
-  keys[e.key.toLowerCase()] = false;
-});
+  const hand = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.1, 0.3),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  c.add(hand);
+
+  scene.add(c);
+}
+makeController(0);
+makeController(1);
 
 // ================= MOVEMENT =================
-function move() {
-  if (ride) return;
+const keys = {};
+addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-  const speed = 0.08;
+function move() {
   const dir = new THREE.Vector3();
 
   if (keys['w']) dir.z -= 1;
@@ -121,33 +130,109 @@ function move() {
   dir.normalize();
   dir.applyQuaternion(camera.quaternion);
 
-  rig.position.addScaledVector(dir, speed);
+  rig.position.addScaledVector(dir, 0.08);
 
-  // swim slow zone
-  const distToWater = rig.position.distanceTo(water.position);
-  if (distToWater < 12) {
+  // swim effect
+  if (rig.position.distanceTo(water.position) < 12) {
     rig.position.y = 1.4 + Math.sin(Date.now() * 0.003) * 0.2;
   } else {
     rig.position.y = 0;
   }
 }
 
-// ================= VR CONTROLLERS =================
-function makeController(i) {
-  const c = renderer.xr.getController(i);
+// ================= ROLLER COASTER =================
+let ride = false;
+let t = 0;
+let rideOffset = new THREE.Vector3();
 
-  c.addEventListener('selectstart', () => {});
-  scene.add(c);
+addEventListener('keydown', e => {
+  if (e.key.toLowerCase() === 'c') {
+    ride = !ride;
+
+    if (ride) {
+      const p = curve.getPointAt(t);
+      rideOffset.copy(rig.position).sub(p);
+    }
+  }
+});
+
+// ================= CAINE + BUBBLE =================
+function addClothes(character) {
+  character.mesh.children.forEach(c => character.mesh.remove(c));
+
+  const style = Math.floor(Math.random() * 4);
+  let color = 0xffffff;
+
+  if (style === 0) color = 0x000000;
+  if (style === 1) color = 0x222222;
+  if (style === 2) color = 0xffff00;
+  if (style === 3) color = 0x111111;
+
+  const outfit = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 0.5),
+    new THREE.MeshStandardMaterial({ color })
+  );
+
+  outfit.position.y = 0.5;
+  character.mesh.add(outfit);
 }
-makeController(0);
-makeController(1);
+
+class Character {
+  constructor(mesh) {
+    this.mesh = mesh;
+    this.target = mesh.position.clone();
+    this.timer = 0;
+    scene.add(mesh);
+  }
+
+  update() {
+    this.timer++;
+
+    if (this.timer % 300 === 0) addClothes(this);
+
+    if (this.mesh.position.distanceTo(this.target) < 0.5) {
+      this.target.set(
+        (Math.random() - 0.5) * 30,
+        1,
+        (Math.random() - 0.5) * 30
+      );
+
+      for (let i = 0; i < 3; i++) {
+        const box = new THREE.Mesh(
+          new THREE.BoxGeometry(1, 1, 1),
+          new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff })
+        );
+        box.position.copy(this.mesh.position).add(new THREE.Vector3(i, 0, 0));
+        scene.add(box);
+      }
+    }
+
+    this.mesh.position.lerp(this.target, 0.03);
+  }
+}
+
+const caine = new Character(
+  new THREE.Mesh(
+    new THREE.CapsuleGeometry(0.5, 1.5),
+    new THREE.MeshStandardMaterial({ color: 0xff0000 })
+  )
+);
+caine.mesh.position.set(-5, 1, -5);
+
+const bubble = new Character(
+  new THREE.Mesh(
+    new THREE.SphereGeometry(0.5),
+    new THREE.MeshStandardMaterial({ color: 0x00ffff })
+  )
+);
+bubble.mesh.position.set(5, 1, -5);
 
 // ================= LOOP =================
 renderer.setAnimationLoop(() => {
 
   move();
 
-  // coaster progress
+  // coaster
   t += 0.0015;
   if (t > 1) t = 0;
 
@@ -156,23 +241,23 @@ renderer.setAnimationLoop(() => {
 
   cart.position.copy(pos);
 
-  // 🎢 VR RIDE FIX (IMPORTANT)
   if (ride) {
     rig.position.copy(pos).add(rideOffset);
     rig.lookAt(next);
   }
 
-  // 🌞 day/night cycle
-  const time = Date.now() * 0.0001;
+  // ferris wheel
+  wheel.rotation.z += 0.002;
 
+  // day/night
+  const time = Date.now() * 0.0001;
   sun.position.set(Math.sin(time) * 30, Math.cos(time) * 30, 0);
   moon.position.set(-Math.sin(time) * 30, -Math.cos(time) * 30, 0);
-
   sunLight.position.copy(sun.position);
-  sunLight.intensity = Math.max(0, sun.position.y / 20);
 
-  // 🌊 water animation
-  water.material.opacity = 0.5 + Math.sin(Date.now() * 0.002) * 0.2;
+  // update AI
+  caine.update();
+  bubble.update();
 
   renderer.render(scene, camera);
 });
