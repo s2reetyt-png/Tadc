@@ -8,13 +8,17 @@ scene.background = new THREE.Color(0x87ceeb);
 
 const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
 
-// VR PLAYER ROOT
+// ================= VR RIG =================
 const rig = new THREE.Group();
-scene.add(rig);
-rig.add(camera);
-camera.position.set(0, 1.6, 0);
+const head = new THREE.Group();
+rig.add(head);
+head.add(camera);
+camera.position.set(0, 0, 0);
 
-// RENDERER
+scene.add(rig);
+rig.position.set(0, 0, 0);
+
+// ================= RENDERER =================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.xr.enabled = true;
@@ -23,10 +27,9 @@ document.body.appendChild(VRButton.createButton(renderer));
 
 // ================= LIGHT =================
 scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-const light = new THREE.DirectionalLight(0xffffff, 1);
-scene.add(light);
+scene.add(new THREE.DirectionalLight(0xffffff, 1));
 
-// ================= WORLD =================
+// ================= GROUND =================
 const floor = new THREE.Mesh(
   new THREE.PlaneGeometry(100,100),
   new THREE.MeshStandardMaterial({ color: 0x44aa44 })
@@ -34,131 +37,80 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI/2;
 scene.add(floor);
 
-const water = new THREE.Mesh(
-  new THREE.CircleGeometry(15, 32),
-  new THREE.MeshStandardMaterial({ color: 0x3399ff, transparent: true, opacity: 0.6 })
-);
-water.rotation.x = -Math.PI/2;
-water.position.set(20,0.1,0);
-scene.add(water);
+// ================= OBJECTS YOU CAN PICK UP =================
+const objects = [];
 
-// ================= VR HANDS =================
-function makeHand(x){
-  const hand = new THREE.Mesh(
-    new THREE.BoxGeometry(0.15,0.15,0.4),
-    new THREE.MeshStandardMaterial({ color:0xffffff })
-  );
-  hand.position.set(x, -0.2, -0.5);
-  return hand;
-}
-
-function setupController(i){
-  const c = renderer.xr.getController(i);
-  c.add(makeHand(i===0 ? -0.2 : 0.2));
-  scene.add(c);
-}
-setupController(0);
-setupController(1);
-
-// ================= SIMPLE VR MOVEMENT (WORKS RELIABLY) =================
-let leftGamepad = null;
-
-renderer.xr.getController(0).addEventListener('connected', (e)=>{
-  if(e.data?.handedness === 'left'){
-    leftGamepad = e.data.gamepad;
-  }
-});
-
-function updateMovement(){
-
-  let x = 0;
-  let y = 0;
-
-  if(leftGamepad){
-    x = leftGamepad.axes[2] || 0;
-    y = leftGamepad.axes[3] || 0;
-  }
-
-  const speed = 0.06;
-
-  const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
-  forward.y = 0;
-  forward.normalize();
-
-  const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
-  right.y = 0;
-  right.normalize();
-
-  rig.position.addScaledVector(forward, -y * speed);
-  rig.position.addScaledVector(right, x * speed);
-
-  // water effect
-  if(rig.position.distanceTo(water.position) < 12){
-    rig.position.y = 1.3 + Math.sin(Date.now()*0.003)*0.2;
-  } else {
-    rig.position.y = 0;
-  }
-}
-
-// ================= CAINE + BUBBLE =================
-function block(pos, color=0xff0000){
+function makePickup(pos){
   const m = new THREE.Mesh(
-    new THREE.BoxGeometry(1,1,1),
-    new THREE.MeshStandardMaterial({ color })
+    new THREE.BoxGeometry(0.4,0.4,0.4),
+    new THREE.MeshStandardMaterial({ color: Math.random()*0xffffff })
   );
   m.position.copy(pos);
   scene.add(m);
+  objects.push(m);
 }
 
-class Character{
-  constructor(mesh, canBuild){
-    this.mesh = mesh;
-    this.canBuild = canBuild;
-    this.target = mesh.position.clone();
-    scene.add(mesh);
-  }
+for(let i=0;i<10;i++){
+  makePickup(new THREE.Vector3((Math.random()-0.5)*10,1,(Math.random()-0.5)*10));
+}
 
-  update(){
-    if(this.mesh.position.distanceTo(this.target) < 0.5){
+// ================= VR HANDS (REAL TRACKED CONTROLLERS) =================
+const controller0 = renderer.xr.getController(0);
+const controller1 = renderer.xr.getController(1);
 
-      this.target.set(
-        (Math.random()-0.5)*30,
-        1,
-        (Math.random()-0.5)*30
-      );
+scene.add(controller0);
+scene.add(controller1);
 
-      if(this.canBuild){
-        for(let i=0;i<3;i++){
-          block(this.mesh.position.clone().add(new THREE.Vector3(i,0,0)), 0xff4444);
-        }
-      }
+// visual hands that FOLLOW controllers
+function makeHand(color){
+  const hand = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1,0.1,0.2),
+    new THREE.MeshStandardMaterial({ color })
+  );
+  return hand;
+}
+
+const handMesh0 = makeHand(0xffffff);
+const handMesh1 = makeHand(0xffffff);
+
+controller0.add(handMesh0);
+controller1.add(handMesh1);
+
+// ================= GRAB SYSTEM =================
+let held = [null, null];
+
+function tryGrab(i, controller){
+  const origin = new THREE.Vector3();
+  controller.getWorldPosition(origin);
+
+  let closest = null;
+  let dist = 1.2;
+
+  for(const obj of objects){
+    const d = obj.position.distanceTo(origin);
+    if(d < dist){
+      closest = obj;
+      dist = d;
     }
+  }
 
-    this.mesh.position.lerp(this.target, 0.03);
+  if(closest){
+    held[i] = closest;
   }
 }
 
-// CAINE (BUILDS)
-const caine = new Character(
-  new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.5,1.5),
-    new THREE.MeshStandardMaterial({ color:0xff0000 })
-  ),
-  true
-);
-caine.mesh.position.set(-5,1,-5);
+function release(i){
+  held[i] = null;
+}
 
-// BUBBLE (NO BUILD)
-const bubble = new Character(
-  new THREE.Mesh(
-    new THREE.SphereGeometry(0.5),
-    new THREE.MeshStandardMaterial({ color:0x00ffff })
-  ),
-  false
-);
-bubble.mesh.position.set(5,1,-5);
+// controller events
+controller0.addEventListener('selectstart', ()=>tryGrab(0, controller0));
+controller0.addEventListener('selectend', ()=>release(0));
 
-// ================= SIMPLE COASTER =================
+controller1.addEventListener('selectstart', ()=>tryGrab(1, controller1));
+controller1.addEventListener('selectend', ()=>release(1));
+
+// ================= COASTER =================
 let t = 0;
 
 const path = new THREE.CatmullRomCurve3([
@@ -175,6 +127,34 @@ const cart = new THREE.Mesh(
 );
 scene.add(cart);
 
+// ================= MOVEMENT (LEFT STICK SIMPLE) =================
+let leftGamepad = null;
+
+controller0.addEventListener('connected', (e)=>{
+  if(e.data?.handedness === 'left'){
+    leftGamepad = e.data.gamepad;
+  }
+});
+
+function updateMovement(){
+
+  if(leftGamepad){
+    const x = leftGamepad.axes[2] || 0;
+    const y = leftGamepad.axes[3] || 0;
+
+    const forward = new THREE.Vector3(0,0,-1).applyQuaternion(camera.quaternion);
+    forward.y = 0;
+    forward.normalize();
+
+    const right = new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion);
+    right.y = 0;
+    right.normalize();
+
+    rig.position.addScaledVector(forward, -y * 0.06);
+    rig.position.addScaledVector(right, x * 0.06);
+  }
+}
+
 // ================= LOOP =================
 renderer.setAnimationLoop(()=>{
 
@@ -187,8 +167,17 @@ renderer.setAnimationLoop(()=>{
   const pos = path.getPointAt(t);
   cart.position.copy(pos);
 
-  caine.update();
-  bubble.update();
+  // update held objects (follow hands)
+  controller0.getWorldPosition(new THREE.Vector3()).toArray;
+  controller1.getWorldPosition(new THREE.Vector3()).toArray;
+
+  if(held[0]){
+    controller0.getWorldPosition(held[0].position);
+  }
+
+  if(held[1]){
+    controller1.getWorldPosition(held[1].position);
+  }
 
   renderer.render(scene,camera);
 });
@@ -197,6 +186,6 @@ renderer.setAnimationLoop(()=>{
 addEventListener('resize',()=>{
   camera.aspect = innerWidth/innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth,innerHeight);
+  renderer.setSize(innerWidth, innerHeight);
 });
 </script>
