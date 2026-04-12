@@ -25,7 +25,7 @@ scene.add(new THREE.AmbientLight(0xffffff, 0.7));
 const sunLight = new THREE.DirectionalLight(0xffffff, 1);
 scene.add(sunLight);
 
-// ================= FLOOR =================
+// ================= WORLD =================
 const floor = new THREE.Mesh(
   new THREE.CircleGeometry(60, 64),
   new THREE.MeshStandardMaterial({ color: 0xff4444 })
@@ -33,7 +33,6 @@ const floor = new THREE.Mesh(
 floor.rotation.x = -Math.PI / 2;
 scene.add(floor);
 
-// ================= BEACH =================
 const water = new THREE.Mesh(
   new THREE.CircleGeometry(15, 64),
   new THREE.MeshStandardMaterial({ color: 0x3399ff, transparent: true, opacity: 0.6 })
@@ -107,19 +106,19 @@ function makeController(i) {
     new THREE.BoxGeometry(0.1, 0.1, 0.3),
     new THREE.MeshStandardMaterial({ color: 0xffffff })
   );
-  c.add(hand);
 
+  c.add(hand);
   scene.add(c);
 }
 makeController(0);
 makeController(1);
 
-// ================= MOVEMENT =================
+// ================= PLAYER MOVEMENT (NO BUILD) =================
 const keys = {};
 addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 
-function move() {
+function movePlayer() {
   const dir = new THREE.Vector3();
 
   if (keys['w']) dir.z -= 1;
@@ -132,7 +131,6 @@ function move() {
 
   rig.position.addScaledVector(dir, 0.08);
 
-  // swim effect
   if (rig.position.distanceTo(water.position) < 12) {
     rig.position.y = 1.4 + Math.sin(Date.now() * 0.003) * 0.2;
   } else {
@@ -140,7 +138,7 @@ function move() {
   }
 }
 
-// ================= ROLLER COASTER =================
+// ================= ROLLER COASTER RIDE =================
 let ride = false;
 let t = 0;
 let rideOffset = new THREE.Vector3();
@@ -156,25 +154,15 @@ addEventListener('keydown', e => {
   }
 });
 
-// ================= CAINE + BUBBLE =================
-function addClothes(character) {
-  character.mesh.children.forEach(c => character.mesh.remove(c));
-
-  const style = Math.floor(Math.random() * 4);
-  let color = 0xffffff;
-
-  if (style === 0) color = 0x000000;
-  if (style === 1) color = 0x222222;
-  if (style === 2) color = 0xffff00;
-  if (style === 3) color = 0x111111;
-
-  const outfit = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 0.5),
+// ================= CAINE + BUBBLE BUILD SYSTEM =================
+function createBlock(pos, color = Math.random() * 0xffffff) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
     new THREE.MeshStandardMaterial({ color })
   );
-
-  outfit.position.y = 0.5;
-  character.mesh.add(outfit);
+  mesh.position.copy(pos);
+  scene.add(mesh);
+  return mesh;
 }
 
 class Character {
@@ -188,8 +176,7 @@ class Character {
   update() {
     this.timer++;
 
-    if (this.timer % 300 === 0) addClothes(this);
-
+    // pick new target
     if (this.mesh.position.distanceTo(this.target) < 0.5) {
       this.target.set(
         (Math.random() - 0.5) * 30,
@@ -197,13 +184,11 @@ class Character {
         (Math.random() - 0.5) * 30
       );
 
+      // 🧱 THEY BUILD (NOT PLAYER)
       for (let i = 0; i < 3; i++) {
-        const box = new THREE.Mesh(
-          new THREE.BoxGeometry(1, 1, 1),
-          new THREE.MeshStandardMaterial({ color: Math.random() * 0xffffff })
+        createBlock(
+          this.mesh.position.clone().add(new THREE.Vector3(i, 0, 0))
         );
-        box.position.copy(this.mesh.position).add(new THREE.Vector3(i, 0, 0));
-        scene.add(box);
       }
     }
 
@@ -211,6 +196,7 @@ class Character {
   }
 }
 
+// CAINE
 const caine = new Character(
   new THREE.Mesh(
     new THREE.CapsuleGeometry(0.5, 1.5),
@@ -219,6 +205,7 @@ const caine = new Character(
 );
 caine.mesh.position.set(-5, 1, -5);
 
+// BUBBLE
 const bubble = new Character(
   new THREE.Mesh(
     new THREE.SphereGeometry(0.5),
@@ -230,9 +217,9 @@ bubble.mesh.position.set(5, 1, -5);
 // ================= LOOP =================
 renderer.setAnimationLoop(() => {
 
-  move();
+  movePlayer();
 
-  // coaster
+  // coaster motion
   t += 0.0015;
   if (t > 1) t = 0;
 
@@ -255,7 +242,7 @@ renderer.setAnimationLoop(() => {
   moon.position.set(-Math.sin(time) * 30, -Math.cos(time) * 30, 0);
   sunLight.position.copy(sun.position);
 
-  // update AI
+  // AI update
   caine.update();
   bubble.update();
 
